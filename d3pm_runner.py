@@ -8,6 +8,8 @@ from torchvision.datasets import MNIST
 from torchvision.utils import make_grid
 from tqdm import tqdm
 
+from schedule_sample import sample_n_transitions
+
 blk = lambda ic, oc: nn.Sequential(
     nn.Conv2d(ic, oc, 5, padding=2),
     nn.GroupNorm(oc // 8, oc),
@@ -38,9 +40,22 @@ blku = lambda ic, oc: nn.Sequential(
 
 class DummyX0Model(nn.Module):
 
-    def __init__(self, n_channel: int, N: int = 16) -> None:
+    def __init__(self, n_channel: int, N: int = 16, n_T:int = 1000, schedule_conditioning=False) -> None:
         super(DummyX0Model, self).__init__()
-        self.down1 = blk(n_channel, 16)
+        
+        if schedule_conditioning:
+            s_dim = 16
+            in_channel = n_channel + n_channel * s_dim
+
+            self.S_embed = nn.Embedding(n_T, s_dim)
+            self.S_embed.weight.data = torch.stack(
+                [torch.sin(torch.arange(n_T) * 3.1415 * 2**i) for i in range(s_dim // 2)] + 
+                [torch.cos(torch.arange(n_T) * 3.1415 * 2**i) for i in range(s_dim // 2)]
+            ).T
+        else:
+            in_channel = n_channel
+
+        self.down1 = blk(in_channel, 16)
         self.down2 = blk(16, 32)
         self.down3 = blk(32, 64)
         self.down4 = blk(64, 512)
@@ -69,8 +84,15 @@ class DummyX0Model(nn.Module):
         self.temb_4 = nn.Linear(32, 512)
         self.N = N
 
-    def forward(self, x, t, cond) -> torch.Tensor:
+    def forward(self, x, t, cond, S) -> torch.Tensor:
         x = (2 * x.float() / self.N) - 1.0
+    
+        if S is not None:
+            s_embed = self.S_embed(S.permute(0,2,3,1))
+            s_embed = s_embed.reshape(*s_embed.shape[:-2], -1).permute(0,3,1,2)
+
+            x = torch.cat([x, s_embed], dim=1)
+
         t = t.float().reshape(-1, 1) / 1000
         t_features = [torch.sin(t * 3.1415 * 2**i) for i in range(16)] + [
             torch.cos(t * 3.1415 * 2**i) for i in range(16)
@@ -139,6 +161,7 @@ class D3PM(nn.Module):
         num_classes: int = 10,
         forward_type="uniform",
         hybrid_loss_coeff=0.001,
+        schedule_conditioning=False,
     ) -> None:
         super(D3PM, self).__init__()
         self.x0_model = x0_model
@@ -157,6 +180,15 @@ class D3PM(nn.Module):
         self.num_classses = num_classes
         q_onestep_mats = []
         q_mats = []  # these are cumulative
+
+        self.schedule_conditioning = schedule_conditioning
+        if schedule_conditioning:
+            K = torch.ones(num_classes, num_classes)
+            K.diagonal().fill_(0)
+            K = K / (num_classes - 1)
+            K_powers = torch.stack([torch.linalg.matrix_power(K, i) for i in range(n_T)])
+            self.register_buffer("K", K)
+            self.register_buffer("K_powers", K_powers)
 
         for beta in self.beta_t:
 
@@ -197,7 +229,7 @@ class D3PM(nn.Module):
         # out[i, j, k, l, m] = a[t[i, j, k, l], x[i, j, k, l], m]
         return a[t, x, :]
 
-    def q_posterior_logits(self, x_0, x_t, t):
+    def q_posterior_logits(self, x_0, x_t, t, S=None):
         # if t == 1, this means we return the L_0 loss, so directly try to x_0 logits.
         # otherwise, we return the L_{t-1} loss.
         # Also, we never have t == 0.
@@ -221,10 +253,18 @@ class D3PM(nn.Module):
 
         fact1 = self._at(self.q_one_step_transposed, t, x_t)
 
+        if S is None:
+            fact1 = self._at(self.q_one_step_transposed, t, x_t)
+        else:
+            fact1 = self.K[x_t, :]
+        
+        if S is None:        
+            trans_mats = self.q_mats[t - 1].to(dtype=x_0_logits.dtype)
+        else:
+            trans_mats = self.K_powers[S - 1, :, :]
+
         softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
-        qmats2 = self.q_mats[t - 1].to(dtype=softmaxed.dtype)
-        # bs, num_classes, num_classes
-        fact2 = torch.einsum("b...c,bcd->b...d", softmaxed, qmats2)
+        fact2 = torch.einsum("b...c,b...cd->b...d", softmaxed, trans_mats)
 
         out = torch.log(fact1 + self.eps) + torch.log(fact2 + self.eps)
 
@@ -246,20 +286,24 @@ class D3PM(nn.Module):
         )
         return out.sum(dim=-1).mean()
 
-    def q_sample(self, x_0, t, noise):
+    def q_sample(self, x_0, t, noise, S=None):
         # forward process, x_0 is the clean input.
-        logits = torch.log(self._at(self.q_mats, t, x_0) + self.eps)
+        if S is not None:
+            logits = torch.log(self.K_powers[S, x_0, :] + self.eps)
+        else:
+            logits = torch.log(self._at(self.q_mats, t, x_0) + self.eps)
+        
         noise = torch.clip(noise, self.eps, 1.0)
         gumbel_noise = -torch.log(-torch.log(noise))
         return torch.argmax(logits + gumbel_noise, dim=-1)
 
-    def model_predict(self, x_0, t, cond):
+    def model_predict(self, x_0, t, cond, S=None):
         # this part exists because in general, manipulation of logits from model's logit
         # so they are in form of x_0's logit might be independent to model choice.
         # for example, you can convert 2 * N channel output of model output to logit via get_logits_from_logistic_pars
         # they introduce at appendix A.8.
 
-        predicted_x0_logits = self.x0_model(x_0, t, cond)
+        predicted_x0_logits = self.x0_model(x_0, t, cond, S)
 
         return predicted_x0_logits
 
@@ -269,20 +313,27 @@ class D3PM(nn.Module):
         x is one-hot of dim (bs, ...), with int values of 0 to num_classes - 1
         """
         t = torch.randint(1, self.n_T, (x.shape[0],), device=x.device)
+        
+        if self.schedule_conditioning:
+            S = sample_n_transitions(self.beta_t.to(x.device), x[0].flatten().shape[0], t)
+            S = S.swapaxes(0, 1).reshape(*x.shape).long()
+        else:
+            S = None
+
         x_t = self.q_sample(
-            x, t, torch.rand((*x.shape, self.num_classses), device=x.device)
+            x, t, torch.rand((*x.shape, self.num_classses), device=x.device), S
         )
+        
         # x_t is same shape as x
         assert x_t.shape == x.shape, print(
             f"x_t.shape: {x_t.shape}, x.shape: {x.shape}"
         )
         # we use hybrid loss.
-
-        predicted_x0_logits = self.model_predict(x_t, t, cond)
+        predicted_x0_logits = self.model_predict(x_t, t, cond, S)
 
         # based on this, we first do vb loss.
-        true_q_posterior_logits = self.q_posterior_logits(x, x_t, t)
-        pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x_t, t)
+        true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S)
+        pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x_t, t, S)
 
         vb_loss = self.vb(true_q_posterior_logits, pred_q_posterior_logits)
 
@@ -296,10 +347,10 @@ class D3PM(nn.Module):
             "ce_loss": ce_loss.detach().item(),
         }
 
-    def p_sample(self, x, t, cond, noise):
+    def p_sample(self, x, t, cond, noise, S):
 
-        predicted_x0_logits = self.model_predict(x, t, cond)
-        pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x, t)
+        predicted_x0_logits = self.model_predict(x, t, cond, S)
+        pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x, t, S)
 
         noise = torch.clip(noise, self.eps, 1.0)
 
@@ -311,23 +362,20 @@ class D3PM(nn.Module):
         )
         return sample
 
-    def sample(self, x, cond=None):
-        for t in reversed(range(1, self.n_T)):
-            t = torch.tensor([t] * x.shape[0], device=x.device)
-            x = self.p_sample(
-                x, t, cond, torch.rand((*x.shape, self.num_classses), device=x.device)
-            )
-
-        return x
-
-    def sample_with_image_sequence(self, x, cond=None, stride=10):
+    def sample_with_image_sequence(self, x, cond=None, S=None, stride=10):
         steps = 0
         images = []
         for t in reversed(range(1, self.n_T)):
             t = torch.tensor([t] * x.shape[0], device=x.device)
-            x = self.p_sample(
-                x, t, cond, torch.rand((*x.shape, self.num_classses), device=x.device)
+            x_next = self.p_sample(
+                x, t, cond, torch.rand((*x.shape, self.num_classses), device=x.device), S
             )
+
+            if S is not None:
+                S = S - (x_next != x).long()
+
+            x = x_next
+
             steps += 1
             if steps % stride == 0:
                 images.append(x)
@@ -341,13 +389,25 @@ class D3PM(nn.Module):
 
 if __name__ == "__main__":
 
+    n_T = 1000
     N = 2  # number of classes for discretized state per pixel
-    d3pm = D3PM(DummyX0Model(1, N), 1000, num_classes=N, hybrid_loss_coeff=0.0).cuda()
+    
+    uniform_noise = True
+    schedule_conditioning = False
+
+    d3pm = D3PM(
+        DummyX0Model(1, N, n_T), 
+        n_T, 
+        num_classes=N, 
+        hybrid_loss_coeff=0.0, 
+        schedule_conditioning=schedule_conditioning
+    ).cuda()
+
     print(f"Total Param Count: {sum([p.numel() for p in d3pm.x0_model.parameters()])}")
     dataset = MNIST(
-        "./data",
+        "/home/nvg7279/d3pm/data",
         train=True,
-        download=True,
+        # download=True,
         transform=transforms.Compose(
             [
                 transforms.ToTensor(),
@@ -398,10 +458,24 @@ if __name__ == "__main__":
 
                 with torch.no_grad():
                     cond = torch.arange(0, 4).cuda() % 10
-                    init_noise = torch.randint(0, N, (4, 1, 32, 32)).cuda()
+                    if uniform_noise:
+                        init_noise = torch.randint(0, N, (4, 1, 32, 32)).cuda()
+                    else:
+                        pass
+
+                    if schedule_conditioning:
+                        S = sample_n_transitions(
+                            d3pm.beta_t, 
+                            init_noise[0].flatten().shape[0], 
+                            torch.tensor(4 * [n_T - 1])
+                        )
+                        S = S.swapaxes(0, 1).reshape(*init_noise.shape).long()
+                        S = S.cuda()
+                    else:
+                        S = None
 
                     images = d3pm.sample_with_image_sequence(
-                        init_noise, cond, stride=40
+                        init_noise, cond, S, stride=40
                     )
                     # image sequences to gif
                     gif = []
