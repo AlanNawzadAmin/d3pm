@@ -8,7 +8,7 @@ from torchvision.datasets import MNIST
 from torchvision.utils import make_grid
 from tqdm import tqdm
 
-from schedule_sample import sample_n_transitions
+from schedule_sample import sample_n_transitions, sample_full_transitions
 
 blk = lambda ic, oc: nn.Sequential(
     nn.Conv2d(ic, oc, 5, padding=2),
@@ -331,7 +331,8 @@ class D3PM(nn.Module):
 
         vb = self.vb(true_q_posterior_logits, pred_q_posterior_logits) # shape x
         if self.schedule_conditioning:
-            weight = S * self.beta_t[t] / torch.cumsum(self.beta_t)[t]
+            weight = self.beta_t.to(x.device)[t] / torch.cumsum(self.beta_t.to(x.device), 0)[t]
+            weight = (S.swapaxes(0, -1) * weight).swapaxes(0, -1) * self.n_T
             vb_loss = (vb * weight).mean()
         else:
             vb_loss = vb.mean()
@@ -361,17 +362,25 @@ class D3PM(nn.Module):
         )
         return sample
 
-    def sample_with_image_sequence(self, x, cond=None, S=None, stride=10):
+    def sample_with_image_sequence(self, x, cond=None, stride=10):
+        # returns x_1
+        if self.schedule_conditioning:
+            transitions = sample_full_transitions(self.beta_t.to(x.device), len(x.flatten())).reshape(x.shape + (-1,))
+            Ss = torch.cumsum(transitions, -1).long()
         steps = 0
         images = []
         for t in reversed(range(1, self.n_T)):
+            if self.schedule_conditioning:
+                S = Ss[..., t]
+                transition = transitions[..., t]
+            else:
+                S = None
             t = torch.tensor([t] * x.shape[0], device=x.device)
             x_next = self.p_sample(
                 x, t, cond, torch.rand((*x.shape, self.num_classses), device=x.device), S
             )
-
-            if S is not None:
-                S = S - (x_next != x).long()
+            if self.schedule_conditioning:
+                x_next = torch.where(transition, x_next, x)
 
             x = x_next
 

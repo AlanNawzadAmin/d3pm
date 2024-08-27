@@ -22,3 +22,14 @@ def sample_n_transitions(beta_t, batch_size, times):
     transitions = transitions.cumsum(-1)
     transitions = transitions[torch.arange(batch_size)[:, None], torch.arange(times.shape[1])[None, :], times.repeat(batch_size, 1)]
     return transitions.reshape((batch_size,) + t_shape)
+
+def sample_full_transitions(beta_t, batch_size):
+    """ For a bunch of betas, simulate # transitions at each timestep.
+    
+    Example usage:
+    sample_n_transitions(d3pm.beta_t, 7)
+    > 7 x 1000 tensor
+    """
+    beta_t = beta_t.reshape(1, -1).repeat(batch_size, 1)
+    transitions = torch.bernoulli(beta_t)
+    return transitions.bool()
