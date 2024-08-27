@@ -185,7 +185,7 @@ class D3PM(nn.Module):
         if schedule_conditioning:
             K = torch.ones(num_classes, num_classes)
             K.diagonal().fill_(0)
-            K = K / (num_classes - 1)
+            K = K / K.sum(-1)[:, None]
             K_powers = torch.stack([torch.linalg.matrix_power(K, i) for i in range(n_T)])
             self.register_buffer("K", K)
             self.register_buffer("K_powers", K_powers)
@@ -230,9 +230,7 @@ class D3PM(nn.Module):
         return a[t, x, :]
 
     def q_posterior_logits(self, x_0, x_t, t, S=None):
-        # if t == 1, this means we return the L_0 loss, so directly try to x_0 logits.
-        # otherwise, we return the L_{t-1} loss.
-        # Also, we never have t == 0.
+        # If we have t == 0, then we calculate the distance to x_0
 
         # if x_0 is integer, we convert it to one-hot.
         if x_0.dtype == torch.int64 or x_0.dtype == torch.int32:
@@ -250,41 +248,37 @@ class D3PM(nn.Module):
 
         # fact1 is "guess of x_{t-1}" from x_t
         # fact2 is "guess of x_{t-1}" from x_0
-
-        fact1 = self._at(self.q_one_step_transposed, t, x_t)
-
         if S is None:
             fact1 = self._at(self.q_one_step_transposed, t, x_t)
         else:
-            fact1 = self.K[x_t, :]
+            fact1 = self.K.T[x_t, :]
         
         if S is None:        
             trans_mats = self.q_mats[t - 1].to(dtype=x_0_logits.dtype)
         else:
-            trans_mats = self.K_powers[S - 1, :, :]
+            trans_mats = self.K_powers[S - 1, :, :] # make sure we ignore S=0 later!
 
         softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
         fact2 = torch.einsum("b...c,b...cd->b...d", softmaxed, trans_mats)
 
         out = torch.log(fact1 + self.eps) + torch.log(fact2 + self.eps)
-
+        # chekc if t==0
         t_broadcast = t.reshape((t.shape[0], *[1] * (x_t.dim())))
 
-        bc = torch.where(t_broadcast == 1, x_0_logits, out)
+        bc = torch.where(t_broadcast == 0, x_0_logits, out)
 
         return bc
 
     def vb(self, dist1, dist2):
-
-        # flatten dist1 and dist2
-        dist1 = dist1.flatten(start_dim=0, end_dim=-2)
-        dist2 = dist2.flatten(start_dim=0, end_dim=-2)
+        # # flatten dist1 and dist2
+        # dist1 = dist1.flatten(start_dim=0, end_dim=-2)
+        # dist2 = dist2.flatten(start_dim=0, end_dim=-2)
 
         out = torch.softmax(dist1 + self.eps, dim=-1) * (
             torch.log_softmax(dist1 + self.eps, dim=-1)
             - torch.log_softmax(dist2 + self.eps, dim=-1)
         )
-        return out.sum(dim=-1).mean()
+        return out.sum(dim=-1)#.mean()
 
     def q_sample(self, x_0, t, noise, S=None):
         # forward process, x_0 is the clean input.
@@ -312,7 +306,7 @@ class D3PM(nn.Module):
         Makes forward diffusion x_t from x_0, and tries to guess x_0 value from x_t using x0_model.
         x is one-hot of dim (bs, ...), with int values of 0 to num_classes - 1
         """
-        t = torch.randint(1, self.n_T, (x.shape[0],), device=x.device)
+        t = torch.randint(0, self.n_T, (x.shape[0],), device=x.device)
         
         if self.schedule_conditioning:
             S = sample_n_transitions(self.beta_t.to(x.device), x[0].flatten().shape[0], t)
@@ -335,7 +329,12 @@ class D3PM(nn.Module):
         true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S)
         pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x_t, t, S)
 
-        vb_loss = self.vb(true_q_posterior_logits, pred_q_posterior_logits)
+        vb = self.vb(true_q_posterior_logits, pred_q_posterior_logits) # shape x
+        if self.schedule_conditioning:
+            weight = S * self.beta_t[t] / torch.cumsum(self.beta_t)[t]
+            vb_loss = (vb * weight).mean()
+        else:
+            vb_loss = vb.mean()
 
         predicted_x0_logits = predicted_x0_logits.flatten(start_dim=0, end_dim=-2)
         x = x.flatten(start_dim=0, end_dim=-1)
