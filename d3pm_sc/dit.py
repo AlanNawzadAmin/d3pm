@@ -281,8 +281,11 @@ class DDiT_Llama(nn.Module):
 class DiT_Llama(nn.Module):
     def __init__(
         self,
-        in_channels=3,
+        n_channel=3,
         N=8,
+        n_T=1000,
+        schedule_conditioning=False,
+        s_dim=16,
         input_size=32,
         patch_size=2,
         dim=512,
@@ -296,10 +299,21 @@ class DiT_Llama(nn.Module):
         learn_sigma=True,
     ):
         super().__init__()
+        if schedule_conditioning:
+            in_channels = n_channel + n_channel * s_dim
+
+            self.S_embed = nn.Embedding(n_T, s_dim)
+            self.S_embed.weight.data = torch.stack(
+                [torch.sin(torch.arange(n_T) * 3.1415 * 2**i) for i in range(s_dim // 2)] + 
+                [torch.cos(torch.arange(n_T) * 3.1415 * 2**i) for i in range(s_dim // 2)]
+            ).T
+        else:
+            in_channels = n_channel
         self.N = N
+        self.n_channel = n_channel
         self.learn_sigma = learn_sigma
-        self.in_channels = in_channels
-        self.out_channels = N * in_channels * 2
+        self.in_channels = n_channel
+        self.out_channels = N * n_channel * 2
         self.input_size = input_size
         self.patch_size = patch_size
 
@@ -357,11 +371,16 @@ class DiT_Llama(nn.Module):
         x = x.permute(0, 2, 4, 1, 3, 5).flatten(-3).flatten(1, 2)
         return x
 
-    def forward(self, x, t, y):
+    def forward(self, x, t, y, S=None):
         self.freqs_cis = self.freqs_cis.to(x.device)
 
-        x_onehot = torch.nn.functional.one_hot(x, self.N).float().to(x.device)
+        x_onehot = torch.nn.functional.one_hot(x[:, :self.n_channel], self.N).float().to(x.device)
         x = (2 * x.float() / (self.N - 1)) - 1.0
+        if S is not None:
+            s_embed = self.S_embed(S.permute(0,2,3,1))
+            s_embed = s_embed.reshape(*s_embed.shape[:-2], -1).permute(0,3,1,2)
+
+            x = torch.cat([x, s_embed], dim=1)
         x = self.init_conv_seq(x)
 
         x = self.patchify(x)

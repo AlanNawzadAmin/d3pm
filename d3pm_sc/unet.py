@@ -31,11 +31,10 @@ blku = lambda ic, oc: nn.Sequential(
 
 class UNet(nn.Module):
 
-    def __init__(self, n_channel: int, N: int = 16, n_T:int = 1000, schedule_conditioning=False) -> None:
-        super(UNet, self).__init__()
+    def __init__(self, n_channel: int, N: int = 16, n_T:int = 1000, schedule_conditioning=False, s_dim=16) -> None:
+        super().__init__()
         
         if schedule_conditioning:
-            s_dim = 16
             in_channel = n_channel + n_channel * s_dim
 
             self.S_embed = nn.Embedding(n_T, s_dim)
@@ -46,6 +45,7 @@ class UNet(nn.Module):
         else:
             in_channel = n_channel
 
+        self.n_channel = n_channel
         self.down1 = blk(in_channel, 16)
         self.down2 = blk(16, 32)
         self.down3 = blk(32, 64)
@@ -75,8 +75,9 @@ class UNet(nn.Module):
         self.temb_4 = nn.Linear(32, 512)
         self.N = N
 
-    def forward(self, x, t, cond, S) -> torch.Tensor:
-        x = (2 * x.float() / self.N) - 1.0
+    def forward(self, x, t, cond, S=None) -> torch.Tensor:
+        x = x.float()
+        x[..., :self.n_channel, :, :] = (2 * x[..., :self.n_channel, :, :] / self.N) - 1.0
     
         if S is not None:
             s_embed = self.S_embed(S.permute(0,2,3,1))
@@ -142,3 +143,73 @@ class UNet(nn.Module):
         )
 
         return y
+
+import torch.nn.functional as F
+
+class SimpleConvBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, padding=1)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, padding=1)
+        self.norm = nn.BatchNorm2d(out_channels)
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = self.norm(self.conv2(x))
+        return F.relu(x)
+
+class SimpleUNet(nn.Module):
+    def __init__(self, n_channel, N, n_T, schedule_conditioning=False, s_dim=16):
+        super().__init__()
+
+        if schedule_conditioning:
+            in_channel = n_channel + n_channel * s_dim
+
+            self.S_embed = nn.Embedding(n_T, s_dim)
+            self.S_embed.weight.data = torch.stack(
+                [torch.sin(torch.arange(n_T) * 3.1415 * 2**i) for i in range(s_dim // 2)] + 
+                [torch.cos(torch.arange(n_T) * 3.1415 * 2**i) for i in range(s_dim // 2)]
+            ).T
+        else:
+            in_channel = n_channel
+
+        self.N = N
+        self.n_channel = n_channel
+        out_channel = n_channel * N 
+        
+        # Encoder (downsampling)
+        self.enc1 = SimpleConvBlock(in_channel, 64)
+        self.enc2 = SimpleConvBlock(64, 128)
+        self.enc3 = SimpleConvBlock(128, 256)
+        
+        # Decoder (upsampling)
+        self.dec3 = SimpleConvBlock(256 + 128, 128)  # 256 from enc3, 128 from enc2
+        self.dec2 = SimpleConvBlock(128 + 64, 64)    # 128 from dec3, 64 from enc1
+        self.dec1 = SimpleConvBlock(64, 32)
+        
+        self.final = nn.Conv2d(32, out_channel, 1)
+
+    def forward(self, x, t, cond, S=None):
+        x = x.float()
+        x[..., :self.n_channel, :, :] = (2 * x[..., :self.n_channel, :, :] / self.N) - 1.0
+    
+        if S is not None:
+            s_embed = self.S_embed(S.permute(0,2,3,1))
+            s_embed = s_embed.reshape(*s_embed.shape[:-2], -1).permute(0,3,1,2)
+
+            x = torch.cat([x, s_embed], dim=1)
+        
+        # Encoder
+        e1 = self.enc1(x.float())
+        e2 = self.enc2(F.max_pool2d(e1, 2))
+        e3 = self.enc3(F.max_pool2d(e2, 2))
+        
+        # Decoder with skip connections
+        d3 = self.dec3(torch.cat([F.interpolate(e3, scale_factor=2, mode='nearest'), e2], dim=1))
+        d2 = self.dec2(torch.cat([F.interpolate(d3, scale_factor=2, mode='nearest'), e1], dim=1))
+        d1 = self.dec1(d2)
+
+        d0 = self.final(d1)
+        
+        return d0.reshape(d0.shape[0], -1, self.N, *x.shape[2:]).transpose(2, -1)
+
