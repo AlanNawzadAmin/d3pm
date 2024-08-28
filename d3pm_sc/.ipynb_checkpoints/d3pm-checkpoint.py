@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-from schedule_sample import sample_n_transitions, sample_full_transitions
+from .schedule_sample import sample_n_transitions, sample_full_transitions
 
 # TODO: add KL(p(x_1)||q(x_1)), stop conditioning on t, different alpha schedules
 
@@ -14,16 +14,16 @@ class D3PM(nn.Module): #schedule conditioning is True!
         n_T: int,
         num_classes: int = 10,
         forward_type="uniform",
-        gamma=1,
+        gamma=0,
         hybrid_loss_coeff=0.001,
     ) -> None:
-        super(D3PM, self).__init__()
+        super().__init__()
         self.x0_model = x0_model
         self.n_T = n_T
         self.hybrid_loss_coeff = hybrid_loss_coeff
         self.eps = 1e-6
         self.num_classses = num_classes
-        assert gamma > 0 and gamma <= 1 # classical and full schedule resp.
+        assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
         # Precalculate betas and Ks
         steps = torch.arange(n_T + 1, dtype=torch.float64) / n_T
@@ -34,9 +34,9 @@ class D3PM(nn.Module): #schedule conditioning is True!
         if forward_type == "uniform":
             L = torch.ones(num_classes, num_classes) / (num_classes-1)
             L.diagonal().fill_(-1)
-        rate = - (L.diagonal().min()) / gamma # L^* in sec 6.6 of the notes
+        rate = - (L.diagonal().min()) / (1-gamma) # L^* in sec 6.6 of the notes
         K = L / rate + torch.eye(num_classes)
-        self.beta_t = rate * self.beta_t
+        self.beta_t = torch.minimum(rate * self.beta_t, torch.ones_like(alpha_bar[1:]) * 0.999)
         K_powers = torch.stack([torch.linalg.matrix_power(K, i) for i in range(n_T)])
         self.register_buffer("K", K)
         self.register_buffer("K_powers", K_powers)

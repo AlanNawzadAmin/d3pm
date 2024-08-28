@@ -2,8 +2,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from schedule_sample import sample_n_transitions, sample_full_transitions
-
 class D3PM_classic(nn.Module):
     def __init__(
         self,
