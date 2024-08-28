@@ -138,10 +138,12 @@ class D3PM(nn.Module): #schedule conditioning is True!
         Ss = torch.cumsum(transitions, -1).long()
         steps = 0
         images = []
-        for t in tqdm(reversed(range(1, self.n_T))):
+        pbar = tqdm(np.arange(1, self.n_T)[::-1])
+        for t in pbar:
             S = Ss[..., t]
             transition = transitions[..., t]
             if transition.sum() > 0:
+                pbar.set_description(str((transition.sum().cpu().numpy(), transition.shape)))
                 t = torch.tensor([t] * x.shape[0], device=x.device)
                 x_next = self.p_sample(
                     x, t, cond, torch.rand((*x.shape, self.num_classses), device=x.device), S
