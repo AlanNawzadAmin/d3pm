@@ -16,7 +16,7 @@ from tqdm import tqdm
 from transformers import default_data_collator, get_scheduler
 
 import wandb
-from d3pm_runner import D3PM
+from d3pm import D3PM
 from dit import DDiT_Llama
 
 
