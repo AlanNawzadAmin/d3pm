@@ -14,29 +14,35 @@ class MaskingDiffusion(SchdeuleCondition): #schedule conditioning is True!
         x0_model: nn.Module,
         num_classes: int = 10,
         schedule_type="cos",
-        hybrid_loss_coeff=0.001,
+        hybrid_loss_coeff=0.01,
     ):
-        forward_type = "uniform"
+        forward_kwargs={"type":"uniform"}
         gamma = 1/num_classes
-        super().__init__(x0_model, num_classes, schedule_type, hybrid_loss_coeff,
-                         gamma=gamma, forward_type=forward_type)
+        super().__init__(x0_model, num_classes, forward_kwargs, schedule_type, gamma, hybrid_loss_coeff)
         # with this choice, x_t_sample is uniform and 
         # q_posterior_logits returns uniform if S>1 and x_0 pred if S==1
+        # The only differences is the predictions and marginalizing over S>1 in the weight
+        # so we always assume S==1.
+        # in principle we could also speed up sampling by ignoring S>1
 
+    def model_predict(self, x_t, t, cond, S):
+        masked_pos = S > 0
+        masked_x_t = torch.where(masked_pos, self.num_classes, x_t)
+        return self.x0_model(masked_x_t, t, cond, S=None)[..., :-1]
+    
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None) -> torch.Tensor:
         t, S, x_t = self.sample_point(x)
-        masked_pos = S > 0
-        x_t[masked_pos] = self.num_classes # mask these positions
+        S = (S>0).long()
         
         # predict x_0 and prev(x_t)
-        predicted_x0_logits = self.model_predict(x_t, t, cond, S=None) # use masks, not S
+        predicted_x0_logits = self.model_predict(x_t, t, cond, S)
         true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S)
         pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x_t, t, S)
 
         # get kls and loss
-        kl = kls(true_q_posterior_logits, pred_q_posterior_logits, self.eps)
-        weight = - self.beta_scale(t) * self.alpha_scale(t) / (1 - self.alpha_scale(t))
-        weight = (S.swapaxes(0, -1) * weight).swapaxes(0, -1) # mult by S to ignore S=0
+        kl = kls(true_q_posterior_logits, pred_q_posterior_logits, self.eps) # shape x
+        weight = self.beta(t) * self.alpha(t) / (1 - self.alpha(t)) #mult by p(S=1|t)
+        weight = (S.swapaxes(0, -1) * weight).swapaxes(0, -1)
         vb_loss = (kl * weight).mean() * self.t_max
 
         # Also calculate cross entropy loss
@@ -51,8 +57,8 @@ class MaskingDiffusion(SchdeuleCondition): #schedule conditioning is True!
 
     def sample_with_image_sequence(self, x, cond=None, trans_step=1, stride=10):
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
-        S = sample_n_transitions_cont(self.alpha_scale, x[0].flatten().shape[0], t)
-        S = S.swapaxes(0, 1).reshape(*x.shape).long()
+        S = sample_n_transitions_cont(self.alpha, x[0].flatten().shape[0], t)
+        S = (S>0).swapaxes(0, 1).reshape(*x.shape).long() # this is the only line changed
         steps = 0
         images = []
         pbar = tqdm(total=S.sum(-1).sum(-1).sum(-1).max().item(), unit="iteration",
@@ -73,7 +79,7 @@ class MaskingDiffusion(SchdeuleCondition): #schedule conditioning is True!
             pbar.update(trans_step)
             steps += 1
             if steps % stride == 0:
-                images.append(x)
+                images.append(torch.clone(x))
         pbar.close()
         # if last step is not divisible by stride, we add the last image.
         if steps % stride != 0:

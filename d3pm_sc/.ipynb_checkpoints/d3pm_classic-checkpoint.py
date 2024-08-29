@@ -12,7 +12,7 @@ class D3PM_classic(DiscreteTimeDiffusion):
         x0_model: nn.Module,
         n_T: int,
         num_classes: int = 10,
-        forward_type="uniform",
+        forward_kwargs={"type":"uniform"},
         schedule_type="cos",
         hybrid_loss_coeff=0.001,
     ):
@@ -23,11 +23,11 @@ class D3PM_classic(DiscreteTimeDiffusion):
         q_onestep_mats = []
         q_mats = []  # these are cumulative
         for beta in self.beta_t:
-            if forward_type == "uniform":
+            if forward_kwargs['type'] == "uniform":
                 mat = torch.ones(num_classes, num_classes) * beta / num_classes
                 mat.diagonal().fill_(1 - (num_classes - 1) * beta / num_classes)
                 q_onestep_mats.append(mat)
-            elif forward_type == "masking":
+            elif forward_kwargs['type'] == "masking":
                 mat = torch.eye(num_classes) * (1 - beta)
                 mat[:, -1] += beta
                 q_onestep_mats.append(mat)
@@ -43,6 +43,25 @@ class D3PM_classic(DiscreteTimeDiffusion):
         q_mats = torch.stack(q_mats, dim=0)
         self.register_buffer("q_one_step_transposed", q_one_step_transposed)
         self.register_buffer("q_mats", q_mats)
+        
+    def get_stationary(self):
+        evals, evecs = torch.linalg.eig(q_mats[-1].T)
+        assert torch.isclose(evals[torch.argmax(torch.norm(evals))], torch.tensor(1, dtype=torch.complex64))
+        stationary = evecs[:, torch.argmax(torch.norm(evals))]
+        assert torch.allclose(torch.imag(stationary), torch.tensor(0, dtype=self.K.dtype))
+        stationary = torch.real(stationary)
+        stationary = stationary * torch.sign(stationary)
+        assert torch.all(stationary > 0)
+        return stationary / stationary.sum()
+
+    def get_kl_t1(self, x):
+        # get p(x_1|x_0)
+        x_0_logits = convert_to_distribution(x, self.num_classes, self.eps)
+        trans_mats = self.q_mats[-1, :, :]
+        softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
+        x_1 = torch.einsum("b...c,...cd->b...d", softmaxed, trans_mats)
+        kl = kls(x_1, self.get_stationary(), self.eps)
+        return kl.mean()
     
     def x_t_sample(self, x_0, t, noise, S=None):
         # forward process, x_0 is the clean input.

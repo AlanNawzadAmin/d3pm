@@ -7,15 +7,13 @@ from .utils import kls, convert_to_distribution
 from .schedule_sample import sample_n_transitions, sample_full_transitions
 from .discrete_time_diffusion import DiscreteTimeDiffusion
 
-# TODO: add KL(p(x_1)||q(x_1)), stop conditioning on t, different alpha schedules
-
 class D3PM(DiscreteTimeDiffusion): #schedule conditioning is True!
     def __init__(
         self,
         x0_model: nn.Module,
         n_T: int,
         num_classes: int = 10,
-        forward_type="uniform",
+        forward_kwargs={"type":"uniform"},
         schedule_type="cos",
         gamma=0,
         hybrid_loss_coeff=0.001,
@@ -25,13 +23,36 @@ class D3PM(DiscreteTimeDiffusion): #schedule conditioning is True!
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
         # Precalculate Ks
-        L = get_inf_gens(forward_type, num_classes)
+        L = get_inf_gens(forward_kwargs, num_classes)
         rate = - (L.diagonal().min()) / (1-gamma) # L^* in sec 6.6 of the notes
         K = L / rate + torch.eye(num_classes)
         self.beta_t = torch.minimum(rate * self.beta_t, torch.ones_like(self.beta_t) * 0.999)
         K_powers = torch.stack([torch.linalg.matrix_power(K, i) for i in range(n_T)])
         self.register_buffer("K", K)
         self.register_buffer("K_powers", K_powers)
+
+    def get_stationary(self):
+        evals, evecs = torch.linalg.eig(self.K.T)
+        assert torch.isclose(evals[torch.argmax(torch.norm(evals))], torch.tensor(1, dtype=torch.complex64))
+        stationary = evecs[:, torch.argmax(torch.norm(evals))]
+        assert torch.allclose(torch.imag(stationary), torch.tensor(0, dtype=self.K.dtype))
+        stationary = torch.real(stationary)
+        stationary = stationary * torch.sign(stationary)
+        assert torch.all(stationary > 0)
+        return stationary / stationary.sum()
+
+    def get_kl_t1(self, x):
+        # sample S
+        t = (self.n_T-1) * torch.ones(x.shape[0], device=x.device).int()
+        S = sample_n_transitions(self.beta_t.to(x.device), x[0].flatten().shape[0], t)
+        S = S.swapaxes(0, 1).reshape(*x.shape).long()
+        # get p(x_1|x_0, S)
+        x_0_logits =convert_to_distribution(x, self.num_classes, self.eps)
+        trans_mats = self.K_powers[S, :, :]
+        softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
+        x_1 = torch.einsum("b...c,b...cd->b...d", softmaxed, trans_mats)
+        kl = kls(x_1, self.get_stationary(), self.eps)
+        return kl.mean()
 
     def x_t_sample(self, x_0, t, noise, S):
         # forward process, x_0 is the clean input.

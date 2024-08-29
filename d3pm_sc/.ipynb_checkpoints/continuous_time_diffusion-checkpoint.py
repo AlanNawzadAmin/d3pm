@@ -24,12 +24,15 @@ class ContinuousTimeDiffusion(nn.Module): #schedule conditioning is True!
         super().__init__()
         self.x0_model = x0_model
         self.hybrid_loss_coeff = hybrid_loss_coeff
-        self.eps = 1e-6
+        self.eps = 1e-10
         self.num_classes = num_classes
         self.t_max = 0.999
 
         # Precalculate betas
         self.alpha, self.beta = get_betas(schedule_type)
+
+    def get_stationary(self):
+        raise NotImplementedError
 
     def model_predict(self, x_0, t, cond, S=None):
         return self.x0_model(x_0, t, cond, S)
@@ -42,7 +45,7 @@ class ContinuousTimeDiffusion(nn.Module): #schedule conditioning is True!
 
     def sample_point(self, x):
         t = torch.rand(x.shape[0], device=x.device) * self.t_max
-        S = sample_n_transitions_cont(self.alpha_scale, x[0].flatten().shape[0], t)
+        S = sample_n_transitions_cont(self.alpha, x[0].flatten().shape[0], t)
         S = S.swapaxes(0, 1).reshape(*x.shape).long()
         x_t = self.x_t_sample(
             x, t, torch.rand((*x.shape, self.num_classes), device=x.device), S

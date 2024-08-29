@@ -33,12 +33,17 @@ class DiscreteTimeDiffusion(nn.Module): #schedule conditioning is True!
         # Precalculate betas
         self.beta_t = get_betas(schedule_type, n_T)
 
+    def get_stationary(self):
+        raise NotImplementedError
+
+    def get_kl_t1(self, x):
+        raise NotImplementedError
+
     def model_predict(self, x_0, t, cond, S=None):
         return self.x0_model(x_0, t, cond, S)
 
     def q_posterior_logits(self, x_0, x_t, t, S=None):
         raise NotImplementedError
-
 
     def x_t_sample(self, x_0, t, noise, S=None):
         raise NotImplementedError

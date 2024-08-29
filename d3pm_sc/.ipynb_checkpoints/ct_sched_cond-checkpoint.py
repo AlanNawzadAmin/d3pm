@@ -12,24 +12,49 @@ class SchdeuleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         self,
         x0_model: nn.Module,
         num_classes: int = 10,
-        forward_type="uniform",
+        forward_kwargs={"type":"uniform"},
         schedule_type="cos",
         gamma=0,
-        hybrid_loss_coeff=0.001,
+        hybrid_loss_coeff=0.01,
     ):
         # Precalculate betas, define model_predict, p_sample
         super().__init__(x0_model, num_classes, schedule_type, hybrid_loss_coeff)
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
         # Precalculate Ks
-        L = get_inf_gens(forward_type, num_classes)
+        L = get_inf_gens(forward_kwargs, num_classes)
         rate = - (L.diagonal().min()) / (1-gamma) # L^* in sec 6.6 of the notes
         K = L / rate + torch.eye(num_classes)
-        self.beta_scale = lambda t: rate * self.beta(t)
-        self.alpha_scale = lambda t: self.alpha(t) ** rate
+        self.beta_scale = self.beta
+        self.beta = lambda t: rate * self.beta_scale(t)
+        self.alpha_scale = self.alpha
+        self.alpha  = lambda t: self.alpha_scale(t) ** rate
         K_powers = torch.stack([torch.linalg.matrix_power(K, i) for i in range(1000)])
         self.register_buffer("K", K)
         self.register_buffer("K_powers", K_powers)
+
+    def get_stationary(self):
+        evals, evecs = torch.linalg.eig(self.K.T)
+        assert torch.isclose(evals[torch.argmax(torch.norm(evals))], torch.tensor(1, dtype=torch.complex64))
+        stationary = evecs[:, torch.argmax(torch.norm(evals))]
+        assert torch.allclose(torch.imag(stationary), torch.tensor(0, dtype=self.K.dtype))
+        stationary = torch.real(stationary)
+        stationary = stationary * torch.sign(stationary)
+        assert torch.all(stationary > 0)
+        return stationary / stationary.sum()
+
+    def get_kl_t1(self, x):
+        # sample S
+        t = self.t_max * torch.ones(x.shape[0], device=x.device)
+        S = sample_n_transitions_cont(self.alpha, x[0].flatten().shape[0], t)
+        S = S.swapaxes(0, 1).reshape(*x.shape).long()
+        # get p(x_1|x_0, S)
+        x_0_logits = convert_to_distribution(x, self.num_classes, self.eps)
+        trans_mats = self.K_powers[S, :, :]
+        softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
+        x_1 = torch.log(torch.einsum("b...c,b...cd->b...d", softmaxed, trans_mats))
+        kl = kls(x_1, self.get_stationary(), self.eps)
+        return kl.mean()
 
     def x_t_sample(self, x_0, t, noise, S):
         # forward process, x_0 is the clean input.
@@ -61,7 +86,7 @@ class SchdeuleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
 
         # get kls and loss
         kl = kls(true_q_posterior_logits, pred_q_posterior_logits, self.eps) # shape x
-        weight = - self.beta_scale(t) / torch.log(self.alpha_scale(t))
+        weight = - self.beta(t) / torch.log(self.alpha(t))
         weight = (S.swapaxes(0, -1) * weight).swapaxes(0, -1)
         vb_loss = (kl * weight).mean() * self.t_max
 
@@ -77,7 +102,7 @@ class SchdeuleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
 
     def sample_with_image_sequence(self, x, cond=None, trans_step=1, stride=10):
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
-        S = sample_n_transitions_cont(self.alpha_scale, x[0].flatten().shape[0], t)
+        S = sample_n_transitions_cont(self.alpha, x[0].flatten().shape[0], t)
         S = S.swapaxes(0, 1).reshape(*x.shape).long()
         steps = 0
         images = []
@@ -99,7 +124,7 @@ class SchdeuleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
             pbar.update(trans_step)
             steps += 1
             if steps % stride == 0:
-                images.append(x)
+                images.append(torch.clone(x))
         pbar.close()
         # if last step is not divisible by stride, we add the last image.
         if steps % stride != 0:
