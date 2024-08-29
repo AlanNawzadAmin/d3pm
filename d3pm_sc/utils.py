@@ -1,5 +1,8 @@
+import numpy as np
 import torch
 import torch.nn
+from PIL import Image
+from torchvision.utils import make_grid
 
 
 def _at(a, t, x):
@@ -41,3 +44,33 @@ def get_inf_gens(forward_kwargs, num_classes):
         if forward_kwargs['normalize']:
             L = L / (- L.diagonal()[:, None])
     return L
+
+def get_gif(x, model, gen_trans_step, N, batch_size, gif_fname, img_fname):
+    # save images
+    cond = torch.arange(0, batch_size).to(x.device) % 10
+    p = model.get_stationary()
+    samples = torch.multinomial(p, num_samples=batch_size*x.shape[1:].numel(), replacement=True)
+    init_noise = samples.reshape((batch_size,)+x.shape[1:]).to(x.device)
+
+    images = model.sample_with_image_sequence(
+        init_noise, cond, stride=3, trans_step=gen_trans_step,
+    )
+    # image sequences to gif
+    gif = []
+    for image in images:
+        x_as_image = make_grid(image.float() / (N - 1), nrow=2)
+        img = x_as_image.permute(1, 2, 0).cpu().numpy()
+        img = (img * 255).astype(np.uint8)
+        gif.append(Image.fromarray(img))
+
+    if gif_fname is not None:
+        gif[0].save(
+            gif_fname,
+            save_all=True,
+            append_images=gif[1:],
+            duration=100,
+            loop=0,
+        )
+    if img_fname is not None:
+        last_img = gif[-1]
+        last_img.save(img_fname)

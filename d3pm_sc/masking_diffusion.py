@@ -15,10 +15,13 @@ class MaskingDiffusion(SchdeuleCondition): #schedule conditioning is True!
         num_classes: int = 10,
         schedule_type="cos",
         hybrid_loss_coeff=0.01,
+        fix_x_t_bias=False,
+        logistic_pars=False,
     ):
         forward_kwargs={"type":"uniform"}
-        gamma = 1/num_classes
-        super().__init__(x0_model, num_classes, forward_kwargs, schedule_type, gamma, hybrid_loss_coeff)
+        gamma = 1 / num_classes
+        super().__init__(x0_model, num_classes, forward_kwargs, schedule_type, gamma, hybrid_loss_coeff,
+                         fix_x_t_bias, logistic_pars)
         # with this choice, x_t_sample is uniform and 
         # q_posterior_logits returns uniform if S>1 and x_0 pred if S==1
         # The only differences is the predictions and marginalizing over S>1 in the weight
@@ -41,7 +44,8 @@ class MaskingDiffusion(SchdeuleCondition): #schedule conditioning is True!
 
         # get kls and loss
         kl = kls(true_q_posterior_logits, pred_q_posterior_logits, self.eps) # shape x
-        weight = self.beta(t) * self.alpha(t) / (1 - self.alpha(t)) #mult by p(S=1|t)
+        alpha_t = torch.exp(self.log_alpha(t))
+        weight = self.beta(t) * alpha_t / (1 - alpha_t) #mult by p(S=1|t)
         weight = (S.swapaxes(0, -1) * weight).swapaxes(0, -1)
         vb_loss = (kl * weight).mean() * self.t_max
 
@@ -57,7 +61,7 @@ class MaskingDiffusion(SchdeuleCondition): #schedule conditioning is True!
 
     def sample_with_image_sequence(self, x, cond=None, trans_step=1, stride=10):
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
-        S = sample_n_transitions_cont(self.alpha, x[0].flatten().shape[0], t)
+        S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
         S = (S>0).swapaxes(0, 1).reshape(*x.shape).long() # this is the only line changed
         steps = 0
         images = []

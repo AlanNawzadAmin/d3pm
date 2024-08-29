@@ -15,9 +15,11 @@ class D3PM_classic(DiscreteTimeDiffusion):
         forward_kwargs={"type":"uniform"},
         schedule_type="cos",
         hybrid_loss_coeff=0.001,
+        fix_x_t_bias=False,
     ):
         # Precalculate betas, define model_predict, p_sample
         super().__init__(x0_model, n_T, num_classes, schedule_type, hybrid_loss_coeff)
+        self.fix_x_t_bias = fix_x_t_bias
 
         # Precalculate betas and Qs
         q_onestep_mats = []
@@ -76,6 +78,8 @@ class D3PM_classic(DiscreteTimeDiffusion):
         x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
         fact1 = _at(self.q_one_step_transposed, t, x_t) # x_t | x_{t-1}
         trans_mats = self.q_mats[t - 1].to(dtype=x_0_logits.dtype)
+        if self.fix_x_t_bias:
+            x_0_logits -= torch.log(self.q_mats[t, :, x_t] + self.eps) # x_{t} | x_{0}
         softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
         fact2 = torch.einsum("b...c,b...cd->b...d", softmaxed, trans_mats) # x_{t-1} | x_{0}
         out = torch.log(fact1 + self.eps) + torch.log(fact2 + self.eps)

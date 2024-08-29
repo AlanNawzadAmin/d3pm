@@ -17,9 +17,11 @@ class D3PM(DiscreteTimeDiffusion): #schedule conditioning is True!
         schedule_type="cos",
         gamma=0,
         hybrid_loss_coeff=0.001,
+        fix_x_t_bias=False,
     ):
         # Precalculate betas, define model_predict, p_sample
         super().__init__(x0_model, n_T, num_classes, schedule_type, hybrid_loss_coeff)
+        self.fix_x_t_bias = fix_x_t_bias
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
         # Precalculate Ks
@@ -65,6 +67,8 @@ class D3PM(DiscreteTimeDiffusion): #schedule conditioning is True!
         x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
         fact1 = self.K.T[x_t, :] # x_t | x_{t-1}
         trans_mats = self.K_powers[S - 1, :, :] # make sure we ignore S=0 later!
+        if self.fix_x_t_bias:
+            x_0_logits -= torch.log(self.K_powers[S, :, x_t] + self.eps) # x_{t} | x_{0}
         softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
         fact2 = torch.einsum("b...c,b...cd->b...d", softmaxed, trans_mats) # x_{t-1} | x_{0}
         out = torch.log(fact1 + self.eps) + torch.log(fact2 + self.eps)
