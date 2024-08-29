@@ -25,11 +25,16 @@ def convert_to_distribution(x_0, num_classes, eps):
         x_0_logits = x_0.clone()
     return x_0_logits
 
-def get_betas(schedule_type, n_T):
-    steps = torch.arange(n_T + 1, dtype=torch.float64) / n_T
-    if schedule_type == 'cos':
-        alpha_bar = 1-torch.cos((1 - steps) * torch.pi / 2)
-        beta_t = torch.minimum(
-            1 - alpha_bar[1:] / alpha_bar[:-1], torch.ones_like(alpha_bar[1:]) * 0.999
-        )
-    return beta_t
+def get_inf_gens(forward_type, num_classes):
+    if forward_type == "uniform":
+        L = torch.ones(num_classes, num_classes) / (num_classes-1)
+        L.diagonal().fill_(-1)
+    elif forward_type == "gaussian":
+        print(1)
+        range_ = torch.arange(num_classes)
+        diff_mat = (range_[:, None] - range_[None, :]) ** 2
+        L = torch.exp(- 4 * diff_mat / (num_classes ** 2))
+        L = L / (L.sum(-1).max() - 1)
+        L.diagonal().fill_(0)
+        L[range_, range_] = -L.sum(-1)
+    return L

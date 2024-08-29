@@ -3,9 +3,10 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-from .utils import _at, kls, convert_to_distribution, get_betas
+from .utils import _at, kls, convert_to_distribution
+from .discrete_time_diffusion import DiscreteTimeDiffusion
 
-class D3PM_classic(nn.Module):
+class D3PM_classic(DiscreteTimeDiffusion):
     def __init__(
         self,
         x0_model: nn.Module,
@@ -14,16 +15,11 @@ class D3PM_classic(nn.Module):
         forward_type="uniform",
         schedule_type="cos",
         hybrid_loss_coeff=0.001,
-    ) -> None:
-        super().__init__()
-        self.x0_model = x0_model
-        self.n_T = n_T
-        self.hybrid_loss_coeff = hybrid_loss_coeff
-        self.eps = 1e-6
-        self.num_classes = num_classes
+    ):
+        # Precalculate betas, define model_predict, p_sample
+        super().__init__(x0_model, n_T, num_classes, schedule_type, hybrid_loss_coeff)
 
         # Precalculate betas and Qs
-        self.beta_t = get_betas(schedule_type, n_T)
         q_onestep_mats = []
         q_mats = []  # these are cumulative
         for beta in self.beta_t:
@@ -48,15 +44,12 @@ class D3PM_classic(nn.Module):
         self.register_buffer("q_one_step_transposed", q_one_step_transposed)
         self.register_buffer("q_mats", q_mats)
     
-    def x_t_sample(self, x_0, t, noise):
+    def x_t_sample(self, x_0, t, noise, S=None):
         # forward process, x_0 is the clean input.
         logits = torch.log(_at(self.q_mats, t, x_0) + self.eps)
         noise = torch.clip(noise, self.eps, 1.0)
         gumbel_noise = -torch.log(-torch.log(noise))
         return torch.argmax(logits + gumbel_noise, dim=-1)
-
-    def model_predict(self, x_0, t, cond):
-        return self.x0_model(x_0, t, cond)
 
     def q_posterior_logits(self, x_0, x_t, t):
         # If we have t == 0, then we calculate the distance to x_0
@@ -73,24 +66,8 @@ class D3PM_classic(nn.Module):
         bc = torch.where(t_broadcast == 0, x_0_logits, out)
         return bc
 
-    # def forward(self, x: torch.Tensor, cond: torch.Tensor = None) -> torch.Tensor:
-    #     t = torch.randint(0, self.n_T, (x.shape[0],), device=x.device)
-    #     predicted_x0_logits = self.model_predict(x, t, cond) 
-    #     # Also calculate cross entropy loss
-    #     predicted_x0_logits = predicted_x0_logits.flatten(start_dim=0, end_dim=-2)
-    #     x = x.flatten(start_dim=0, end_dim=-1)
-    #     ce_loss = torch.nn.CrossEntropyLoss()(predicted_x0_logits, x)
-    #     return ce_loss, {
-    #         "vb_loss": ce_loss.detach().item(),
-    #         "ce_loss": ce_loss.detach().item(),
-    #     }
-
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None) -> torch.Tensor:
-        # sample t, x_t
-        t = torch.randint(0, self.n_T, (x.shape[0],), device=x.device)
-        x_t = self.x_t_sample(
-            x, t, torch.rand((*x.shape, self.num_classes), device=x.device),
-        )
+        t, S, x_t = self.sample_point(x)
         
         # predict x_0 and x_{t-1}
         predicted_x0_logits = self.model_predict(x_t, t, cond)
@@ -105,25 +82,11 @@ class D3PM_classic(nn.Module):
         predicted_x0_logits = predicted_x0_logits.flatten(start_dim=0, end_dim=-2)
         x = x.flatten(start_dim=0, end_dim=-1)
         ce_loss = torch.nn.CrossEntropyLoss()(predicted_x0_logits, x)
-        # print(ce_loss)
 
         return self.hybrid_loss_coeff * ce_loss + vb_loss, {
             "vb_loss": vb_loss.detach().item(),
             "ce_loss": ce_loss.detach().item(),
         }
-
-    def p_sample(self, x, t, cond, noise):
-        # predict x_{t-1}
-        predicted_x0_logits = self.model_predict(x, t, cond)
-        pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x, t)
-        # sample
-        noise = torch.clip(noise, self.eps, 1.0)
-        not_first_step = (t != 0).float().reshape((x.shape[0], *[1] * (x.dim())))
-        gumbel_noise = -torch.log(-torch.log(noise))
-        sample = torch.argmax(
-            pred_q_posterior_logits + gumbel_noise * not_first_step, dim=-1
-        )
-        return sample
 
     def sample_with_image_sequence(self, x, cond=None, stride=10):
         steps = 0
@@ -145,5 +108,3 @@ class D3PM_classic(nn.Module):
             images.append(x)
 
         return images
-
-
