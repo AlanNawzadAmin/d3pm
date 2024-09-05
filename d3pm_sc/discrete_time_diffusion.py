@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from tqdm import tqdm
+from .trainer import DiffusionTrainer
 
 from .schedule_sample import sample_n_transitions, sample_full_transitions
 
@@ -14,18 +15,22 @@ def get_betas(schedule_type, n_T):
         )
     return beta_t
 
-class DiscreteTimeDiffusion(nn.Module): #schedule conditioning is True!
+class DiscreteTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
     def __init__(
         self,
-        x0_model: nn.Module,
+        x0_model_class,
+        nn_params,
         n_T: int,
         num_classes: int = 10,
         schedule_type="cos",
         hybrid_loss_coeff=0.001,
-        logistic_pars=False
+        logistic_pars=False,
+        lr=1e-3,
     ) -> None:
-        super().__init__()
-        self.x0_model = x0_model
+        super().__init__(lr)
+        self.save_hyperparameters(ignore=['x0_model_class'])
+        self.hparams.update(x0_model_class=x0_model_class.__name__)
+        self.x0_model = x0_model_class(**nn_params)
         self.n_T = n_T
         self.hybrid_loss_coeff = hybrid_loss_coeff
         self.eps = 1e-6

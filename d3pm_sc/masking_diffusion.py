@@ -11,17 +11,20 @@ from d3pm_sc.ct_sched_cond import ScheduleCondition
 class MaskingDiffusion(ScheduleCondition): #schedule conditioning is True!
     def __init__(
         self,
-        x0_model: nn.Module,
+        x0_model_class,
+        nn_params,
         num_classes: int = 10,
         schedule_type="cos",
         hybrid_loss_coeff=0.01,
         fix_x_t_bias=False,
         logistic_pars=False,
+        lr=1e-3,
+        **kwargs,
     ):
         forward_kwargs={"type":"uniform"}
         gamma = 1 / num_classes
-        super().__init__(x0_model, num_classes, forward_kwargs, schedule_type, gamma, hybrid_loss_coeff,
-                         fix_x_t_bias, logistic_pars)
+        super().__init__(x0_model_class, nn_params, num_classes, forward_kwargs, schedule_type, gamma, hybrid_loss_coeff,
+                         fix_x_t_bias, logistic_pars, lr)
         # with this choice, x_t_sample is uniform and 
         # q_posterior_logits returns uniform if S>1 and x_0 pred if S==1
         # The only differences is the predictions and marginalizing over S>1 in the weight

@@ -3,6 +3,9 @@ setup.sh
 cu122py310
 data
 test
+outputs
+debugging
+wandb
 wandb
 run.sh
 *.pyc

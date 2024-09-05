@@ -38,19 +38,19 @@ def get_gif(sample_x, model, gen_trans_step, batch_size):
         )
     with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file_img:
         last_img = gif[-1]
-        last_img.save(img_fname)
+        last_img.save(temp_file_img)
     return temp_file.name, temp_file_img.name
     
     return buf
     
 
 class DiffusionTrainer(pl.LightningModule):
-    def __init__(self, lr=1e-3, gen_trans_step=200, n_gen_images=4):
+    def __init__(self, lr=1e-3, gen_trans_step=200, n_gen_images=4, grad_clip_val=0.1):
         super().__init__()
         self.save_hyperparameters()
         self.lr = lr
+        self.grad_clip_val = grad_clip_val
         # logging
-        self.loss_ema = None
         self.sample_x = None
         self.validation_step_outputs = []
         self.gen_trans_step = gen_trans_step
@@ -66,13 +66,8 @@ class DiffusionTrainer(pl.LightningModule):
         x, cond = batch
         # x, cond = x.to(device), cond.to(device)
         loss, info = self(x, cond)
-        if self.loss_ema is None:
-            self.loss_ema = loss.item()
-        else:
-            self.loss_ema = 0.99 * self.loss_ema + 0.01 * loss.item()
         if self.sample_x is None:
             self.sample_x = x[:1]
-        self.log('train_loss_ema', self.loss_ema)
         self.log('train_loss', info['vb_loss'])
         self.log('train_ce_loss', info['ce_loss'])
         with torch.no_grad():
@@ -102,15 +97,15 @@ class DiffusionTrainer(pl.LightningModule):
             if isinstance(self.logger, pl.loggers.WandbLogger):
                 wandb.log({"sample_gif": wandb.Image(gif_fname)})
                 wandb.log({"sample_gif_last": wandb.Image(img_fname)})
-        # # log losses
-        # avg_l01 = torch.stack([x['val_l01'] for x in self.validation_step_outputs]).mean()
-        # avg_l1 = torch.stack([x['val_l1'] for x in self.validation_step_outputs]).mean()
-        # avg_ce = torch.stack([x['val_ce_loss'] for x in self.validation_step_outputs]).mean()
-        # self.log('val_loss', avg_l01+avg_l1, prog_bar=True)
-        # self.log('val_kl_1', avg_l1, prog_bar=True)
-        # self.log('val_ce_loss', avg_ce, prog_bar=True)
-        # self.validation_step_outputs.clear()  # free memory
+
+    def on_fit_start(self):
+        if isinstance(self.logger, pl.loggers.WandbLogger):
+            wandb.config.update(self.hparams)
 
     def configure_optimizers(self):
-        optimizer = optim.AdamW(self.parameters(), lr=self.lr)
-        return optimizer
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
+        return {
+            "optimizer": optimizer,
+            "gradient_clip_val": self.grad_clip_val,
+            "gradient_clip_algorithm": "norm"
+        }

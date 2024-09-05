@@ -7,10 +7,11 @@ from .utils import kls, convert_to_distribution
 from .schedule_sample import sample_n_transitions, sample_full_transitions
 from .discrete_time_diffusion import DiscreteTimeDiffusion
 
-class D3PM(DiscreteTimeDiffusion): #schedule conditioning is True!
+class DiscreteScheduleCondition(DiscreteTimeDiffusion): #schedule conditioning is True!
     def __init__(
         self,
-        x0_model: nn.Module,
+        x0_model_class,
+        nn_params,
         n_T: int,
         num_classes: int = 10,
         forward_kwargs={"type":"uniform"},
@@ -19,9 +20,11 @@ class D3PM(DiscreteTimeDiffusion): #schedule conditioning is True!
         hybrid_loss_coeff=0.001,
         fix_x_t_bias=False,
         logistic_pars=False,
+        lr=1e-3,
+        **kwargs
     ):
         # Precalculate betas, define model_predict, p_sample
-        super().__init__(x0_model, n_T, num_classes, schedule_type, hybrid_loss_coeff, logistic_pars)
+        super().__init__(x0_model_class, nn_params, n_T, num_classes, schedule_type, hybrid_loss_coeff, logistic_pars, lr)
         self.fix_x_t_bias = fix_x_t_bias
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
@@ -36,8 +39,9 @@ class D3PM(DiscreteTimeDiffusion): #schedule conditioning is True!
 
     def get_stationary(self):
         evals, evecs = torch.linalg.eig(self.K.T)
-        assert torch.isclose(evals[torch.argmax(torch.norm(evals))], torch.tensor(1, dtype=torch.complex64))
-        stationary = evecs[:, torch.argmax(torch.norm(evals))]
+        norms_sq = torch.real(evals * evals.conj())
+        assert torch.isclose(evals[torch.argmax(norms_sq)], torch.tensor(1, dtype=torch.complex64))
+        stationary = evecs[:, torch.argmax(norms_sq)]
         assert torch.allclose(torch.imag(stationary), torch.tensor(0, dtype=self.K.dtype))
         stationary = torch.real(stationary)
         stationary = stationary * torch.sign(stationary)

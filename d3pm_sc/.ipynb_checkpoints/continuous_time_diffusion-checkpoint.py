@@ -18,7 +18,8 @@ def get_betas(schedule_type):
 class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
     def __init__(
         self,
-        x0_model: nn.Module,
+        x0_model_class,
+        nn_params,
         num_classes: int = 10,
         schedule_type="cos",
         hybrid_loss_coeff=0.001,
@@ -26,8 +27,9 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
         lr=1e-3,
     ) -> None:
         super().__init__(lr)
-        self.save_hyperparameters(ignore=['x0_model'])
-        self.x0_model = x0_model
+        self.save_hyperparameters(ignore=['x0_model_class'])
+        self.hparams.update(x0_model_class=x0_model_class.__name__)
+        self.x0_model = x0_model_class(**nn_params)
         self.hybrid_loss_coeff = hybrid_loss_coeff
         self.eps = 1e-6
         self.num_classes = num_classes

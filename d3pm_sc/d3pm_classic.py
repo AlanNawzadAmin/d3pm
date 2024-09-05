@@ -6,10 +6,11 @@ from tqdm import tqdm
 from .utils import _at, kls, convert_to_distribution
 from .discrete_time_diffusion import DiscreteTimeDiffusion
 
-class D3PM_classic(DiscreteTimeDiffusion):
+class D3PMClassic(DiscreteTimeDiffusion):
     def __init__(
         self,
-        x0_model: nn.Module,
+        x0_model_class,
+        nn_params,
         n_T: int,
         num_classes: int = 10,
         forward_kwargs={"type":"uniform"},
@@ -17,9 +18,11 @@ class D3PM_classic(DiscreteTimeDiffusion):
         hybrid_loss_coeff=0.001,
         fix_x_t_bias=False,
         logistic_pars=False,
+        lr=1e-3,
+        **kwargs
     ):
         # Precalculate betas, define model_predict, p_sample
-        super().__init__(x0_model, n_T, num_classes, schedule_type, hybrid_loss_coeff, logistic_pars)
+        super().__init__(x0_model_class, nn_params, n_T, num_classes, schedule_type, hybrid_loss_coeff, logistic_pars, lr)
         self.fix_x_t_bias = fix_x_t_bias
 
         # Precalculate betas and Qs
@@ -49,8 +52,9 @@ class D3PM_classic(DiscreteTimeDiffusion):
         
     def get_stationary(self):
         evals, evecs = torch.linalg.eig(q_mats[-1].T)
-        assert torch.isclose(evals[torch.argmax(torch.norm(evals))], torch.tensor(1, dtype=torch.complex64))
-        stationary = evecs[:, torch.argmax(torch.norm(evals))]
+        norms_sq = torch.real(evals * evals.conj())
+        assert torch.isclose(evals[torch.argmax(norms_sq)], torch.tensor(1, dtype=torch.complex64))
+        stationary = evecs[:, torch.argmax(norms_sq)]
         assert torch.allclose(torch.imag(stationary), torch.tensor(0, dtype=self.K.dtype))
         stationary = torch.real(stationary)
         stationary = stationary * torch.sign(stationary)

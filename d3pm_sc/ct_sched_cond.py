@@ -10,7 +10,8 @@ from .continuous_time_diffusion import ContinuousTimeDiffusion
 class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True!
     def __init__(
         self,
-        x0_model: nn.Module,
+        x0_model_class,
+        nn_params,
         num_classes: int = 10,
         forward_kwargs={"type":"uniform"},
         schedule_type="cos",
@@ -18,10 +19,12 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         hybrid_loss_coeff=0.01,
         fix_x_t_bias=False,
         logistic_pars=False,
+        lr=1e-3,
+        **kwargs
     ):
         # Precalculate betas, define model_predict, p_sample
-        super().__init__(x0_model, num_classes, schedule_type, hybrid_loss_coeff, logistic_pars)
-        self.save_hyperparameters(ignore=['x0_model'])
+        super().__init__(x0_model_class, nn_params, num_classes, schedule_type, hybrid_loss_coeff, logistic_pars, lr)
+        self.save_hyperparameters(ignore=['x0_model_class'])
         self.fix_x_t_bias = fix_x_t_bias
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
@@ -39,8 +42,9 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
 
     def get_stationary(self):
         evals, evecs = torch.linalg.eig(self.K.T)
-        assert torch.isclose(evals[torch.argmax(torch.norm(evals))], torch.tensor(1, dtype=torch.complex64))
-        stationary = evecs[:, torch.argmax(torch.norm(evals))]
+        norms_sq = torch.real(evals * evals.conj())
+        assert torch.isclose(evals[torch.argmax(norms_sq)], torch.tensor(1, dtype=torch.complex64))
+        stationary = evecs[:, torch.argmax(norms_sq)]
         assert torch.allclose(torch.imag(stationary), torch.tensor(0, dtype=self.K.dtype))
         stationary = torch.real(stationary)
         stationary = stationary * torch.sign(stationary)
