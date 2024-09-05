@@ -16,9 +16,10 @@ class D3PM_classic(DiscreteTimeDiffusion):
         schedule_type="cos",
         hybrid_loss_coeff=0.001,
         fix_x_t_bias=False,
+        logistic_pars=False,
     ):
         # Precalculate betas, define model_predict, p_sample
-        super().__init__(x0_model, n_T, num_classes, schedule_type, hybrid_loss_coeff)
+        super().__init__(x0_model, n_T, num_classes, schedule_type, hybrid_loss_coeff, logistic_pars)
         self.fix_x_t_bias = fix_x_t_bias
 
         # Precalculate betas and Qs

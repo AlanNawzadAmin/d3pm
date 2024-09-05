@@ -5,10 +5,10 @@ from tqdm import tqdm
 
 from .utils import kls, convert_to_distribution
 from .schedule_sample import sample_n_transitions_cont
-from d3pm_sc.ct_sched_cond import SchdeuleCondition
+from d3pm_sc.ct_sched_cond import ScheduleCondition
 
 
-class MaskingDiffusion(SchdeuleCondition): #schedule conditioning is True!
+class MaskingDiffusion(ScheduleCondition): #schedule conditioning is True!
     def __init__(
         self,
         x0_model: nn.Module,

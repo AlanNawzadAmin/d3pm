@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from tqdm import tqdm
+from .trainer import DiffusionTrainer
 
 from .schedule_sample import sample_n_transitions, sample_full_transitions
 from .schedule_sample import sample_n_transitions_cont
@@ -14,7 +15,7 @@ def get_betas(schedule_type):
     log_alpha = lambda t: torch.log(alpha(t))
     return log_alpha, beta
 
-class ContinuousTimeDiffusion(nn.Module): #schedule conditioning is True!
+class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
     def __init__(
         self,
         x0_model: nn.Module,
@@ -22,8 +23,10 @@ class ContinuousTimeDiffusion(nn.Module): #schedule conditioning is True!
         schedule_type="cos",
         hybrid_loss_coeff=0.001,
         logistic_pars=False,
+        lr=1e-3,
     ) -> None:
-        super().__init__()
+        super().__init__(lr)
+        self.save_hyperparameters(ignore=['x0_model'])
         self.x0_model = x0_model
         self.hybrid_loss_coeff = hybrid_loss_coeff
         self.eps = 1e-6
@@ -43,7 +46,7 @@ class ContinuousTimeDiffusion(nn.Module): #schedule conditioning is True!
         else:
             pred = self.x0_model(x_0, t, cond, S)
             loc = pred[..., 0].unsqueeze(-1)
-            log_scale = pred[..., 1].unsqueeze(-1) # just a hack for now, fix later
+            log_scale = pred[..., 1].unsqueeze(-1)
             inv_scale = torch.exp(- (log_scale - 2.))
             bin_width = 2. / (self.num_classes - 1.)
             bin_centers = torch.linspace(-1., 1., self.num_classes).to(pred.device)

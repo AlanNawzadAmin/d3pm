@@ -7,7 +7,7 @@ from .utils import kls, convert_to_distribution, get_inf_gens
 from .schedule_sample import sample_n_transitions_cont
 from .continuous_time_diffusion import ContinuousTimeDiffusion
 
-class SchdeuleCondition(ContinuousTimeDiffusion): #schedule conditioning is True!
+class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True!
     def __init__(
         self,
         x0_model: nn.Module,
@@ -21,6 +21,7 @@ class SchdeuleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
     ):
         # Precalculate betas, define model_predict, p_sample
         super().__init__(x0_model, num_classes, schedule_type, hybrid_loss_coeff, logistic_pars)
+        self.save_hyperparameters(ignore=['x0_model'])
         self.fix_x_t_bias = fix_x_t_bias
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 

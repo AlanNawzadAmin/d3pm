@@ -22,6 +22,7 @@ class DiscreteTimeDiffusion(nn.Module): #schedule conditioning is True!
         num_classes: int = 10,
         schedule_type="cos",
         hybrid_loss_coeff=0.001,
+        logistic_pars=False
     ) -> None:
         super().__init__()
         self.x0_model = x0_model
@@ -40,7 +41,22 @@ class DiscreteTimeDiffusion(nn.Module): #schedule conditioning is True!
         raise NotImplementedError
 
     def model_predict(self, x_0, t, cond, S=None):
-        return self.x0_model(x_0, t, cond, S)
+        if not self.logistic_pars:
+            return self.x0_model(x_0, t, cond, S)
+        else:
+            pred = self.x0_model(x_0, t, cond, S)
+            loc = pred[..., 0].unsqueeze(-1)
+            log_scale = pred[..., 1].unsqueeze(-1)
+            inv_scale = torch.exp(- (log_scale - 2.))
+            bin_width = 2. / (self.num_classes - 1.)
+            bin_centers = torch.linspace(-1., 1., self.num_classes).to(pred.device)
+            bin_centers = bin_centers - loc
+            log_cdf_min = torch.nn.LogSigmoid()(
+                inv_scale * (bin_centers - 0.5 * bin_width))
+            log_cdf_max = torch.nn.LogSigmoid()(
+                inv_scale * (bin_centers + 0.5 * bin_width))
+            logits = log_cdf_max + torch.log1p(-torch.exp(log_cdf_min-log_cdf_max) + self.eps)
+            return logits
 
     def q_posterior_logits(self, x_0, x_t, t, S=None):
         raise NotImplementedError
