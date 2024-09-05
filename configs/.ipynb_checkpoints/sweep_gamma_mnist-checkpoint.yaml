@@ -1,5 +1,5 @@
 program: train.py
-method: random
+method: grid
 command:
   - ${env}
   - python3

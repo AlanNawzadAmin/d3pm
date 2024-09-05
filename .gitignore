@@ -3,6 +3,7 @@ setup.sh
 cu122py310
 data
 test
+scripts
 outputs
 debugging
 wandb
