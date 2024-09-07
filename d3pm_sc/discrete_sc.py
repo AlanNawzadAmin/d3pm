@@ -20,11 +20,10 @@ class DiscreteScheduleCondition(DiscreteTimeDiffusion): #schedule conditioning i
         hybrid_loss_coeff=0.001,
         fix_x_t_bias=False,
         logistic_pars=False,
-        lr=1e-3,
-        **kwargs
+        **kwargs,
     ):
         # Precalculate betas, define model_predict, p_sample
-        super().__init__(x0_model_class, nn_params, n_T, num_classes, schedule_type, hybrid_loss_coeff, logistic_pars, lr)
+        super().__init__(x0_model_class, nn_params, n_T, num_classes, schedule_type, hybrid_loss_coeff, logistic_pars, **kwargs)
         self.fix_x_t_bias = fix_x_t_bias
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 

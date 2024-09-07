@@ -45,11 +45,12 @@ def get_gif(sample_x, model, gen_trans_step, batch_size):
     
 
 class DiffusionTrainer(pl.LightningModule):
-    def __init__(self, lr=1e-3, gen_trans_step=200, n_gen_images=4, grad_clip_val=0.1):
+    def __init__(self, lr=1e-3, gen_trans_step=200, n_gen_images=4, grad_clip_val=1, weight_decay=0):
         super().__init__()
         self.save_hyperparameters()
         self.lr = lr
         self.grad_clip_val = grad_clip_val
+        self.weight_decay = weight_decay
         # logging
         self.sample_x = None
         self.validation_step_outputs = []
@@ -102,10 +103,15 @@ class DiffusionTrainer(pl.LightningModule):
         if isinstance(self.logger, pl.loggers.WandbLogger):
             wandb.config.update(self.hparams)
 
+    def on_before_optimizer_step(self, optimizer):
+        # Gradient clipping
+        torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=self.grad_clip_val)
+
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         return {
             "optimizer": optimizer,
             "gradient_clip_val": self.grad_clip_val,
+            "gradient_clip_val": self.weight_decay,
             "gradient_clip_algorithm": "norm"
         }

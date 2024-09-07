@@ -23,4 +23,6 @@ architecture:
 train:
     batch_size: 16
     n_epoch: 14
-    lr: 0.001
+    lr: 0.0002
+    grad_clip_val: 1
+    weight_decay: 0

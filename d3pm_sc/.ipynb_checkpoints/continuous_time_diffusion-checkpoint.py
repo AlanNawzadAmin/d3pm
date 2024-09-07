@@ -24,9 +24,9 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
         schedule_type="cos",
         hybrid_loss_coeff=0.001,
         logistic_pars=False,
-        lr=1e-3,
+        **kwargs
     ) -> None:
-        super().__init__(lr)
+        super().__init__(**kwargs)
         self.save_hyperparameters(ignore=['x0_model_class'])
         self.hparams.update(x0_model_class=x0_model_class.__name__)
         self.x0_model = x0_model_class(**nn_params)

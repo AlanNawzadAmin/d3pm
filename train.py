@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import hydra
+import wandb
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader, random_split
 from torchvision import transforms
@@ -53,7 +54,10 @@ def train(cfg: DictConfig) -> None:
         forward_kwargs=OmegaConf.to_container(cfg.model.forward_kwargs, resolve=True),
         logistic_pars=cfg.model.logistic_pars,
         fix_x_t_bias=cfg.model.fix_x_t_bias,
-        n_T=cfg.model.n_T
+        n_T=cfg.model.n_T,
+        lr=cfg.train.lr,
+        grad_clip_val=cfg.train.grad_clip_val,
+        weight_decay=cfg.train.weight_decay,
     )
 
     ##### Load data

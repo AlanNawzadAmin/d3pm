@@ -14,10 +14,13 @@ parameters:
   data.N:
     value: 128
   model.forward_kwargs.type:
-      value: gaussian
-  model.forward_kwargs.normalized:
-      values: [true, false]
-  model.forward_kwargs.bandwidth:
-      values: [0.1, 0.2, 0.4, 0.8]
+      value: uniform
+  model.logistic_pars:
+    values: [true, false]
+  model.hybrid_loss_coeff:
+    values: [0.0, 0.01, 0.1]
   train.lr:
     values: [0.001, 0.0001]
+  architecture.s_dim:
+    values: [2, 4, 8]
+    
