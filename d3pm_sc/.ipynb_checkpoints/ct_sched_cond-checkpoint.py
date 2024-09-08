@@ -35,7 +35,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         self.beta = lambda t: rate * self.beta_scale(t)
         self.log_alpha_scale = self.log_alpha
         self.log_alpha  = lambda t: self.log_alpha_scale(t) * rate
-        K_powers = torch.stack([torch.linalg.matrix_power(K, i) for i in range(5000)])
+        K_powers = torch.stack([torch.linalg.matrix_power(K, i) for i in range(500)])
         self.register_buffer("K", K)
         self.register_buffer("K_powers", K_powers)
 

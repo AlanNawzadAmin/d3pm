@@ -11,6 +11,9 @@ def get_betas(schedule_type):
     if schedule_type == 'cos':
         alpha = lambda t: 1-torch.cos((1 - t) * torch.pi / 2)
         alpha_prime = lambda t: -torch.sin((1 - t) * torch.pi / 2) * torch.pi / 2
+    if schedule_type == 'linear':
+        alpha = lambda t: 1-t
+        alpha_prime = lambda t: -1
     beta = lambda t: - alpha_prime(t) / alpha(t)
     log_alpha = lambda t: torch.log(alpha(t))
     return log_alpha, beta

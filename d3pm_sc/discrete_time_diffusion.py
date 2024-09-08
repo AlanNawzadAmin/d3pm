@@ -10,9 +10,11 @@ def get_betas(schedule_type, n_T):
     steps = torch.arange(n_T + 1, dtype=torch.float64) / n_T
     if schedule_type == 'cos':
         alpha_bar = 1-torch.cos((1 - steps) * torch.pi / 2)
-        beta_t = torch.minimum(
-            1 - alpha_bar[1:] / alpha_bar[:-1], torch.ones_like(alpha_bar[1:]) * 0.999
-        )
+    if schedule_type == 'linear':
+        alpha_bar = 1-steps
+    beta_t = torch.minimum(
+        1 - alpha_bar[1:] / (1e-6+alpha_bar[:-1]), torch.ones_like(alpha_bar[1:]) * 0.999
+    )
     return beta_t
 
 class DiscreteTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!

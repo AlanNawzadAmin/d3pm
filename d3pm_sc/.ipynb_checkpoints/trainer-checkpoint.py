@@ -45,7 +45,7 @@ def get_gif(sample_x, model, gen_trans_step, batch_size):
     
 
 class DiffusionTrainer(pl.LightningModule):
-    def __init__(self, lr=1e-3, gen_trans_step=200, n_gen_images=4, grad_clip_val=1, weight_decay=0):
+    def __init__(self, lr=1e-3, gen_trans_step=200, n_gen_images=4, grad_clip_val=1, weight_decay=0, **kwargs):
         super().__init__()
         self.save_hyperparameters()
         self.lr = lr
@@ -69,20 +69,20 @@ class DiffusionTrainer(pl.LightningModule):
         loss, info = self(x, cond)
         if self.sample_x is None:
             self.sample_x = x[:1]
-        self.log('train_loss', info['vb_loss'])
-        self.log('train_ce_loss', info['ce_loss'])
+        self.log('train_loss', info['vb_loss'], sync_dist=True)
+        self.log('train_ce_loss', info['ce_loss'], sync_dist=True)
         # with torch.no_grad():
         #     param_norm = sum([torch.norm(p) for p in self.parameters()])
-        # self.log('param_norm', param_norm)
+        # self.log('param_norm', param_norm, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         x, cond = batch
         # x, cond = x.to(device), cond.to(device)
         loss, info = self(x, cond)
-        self.log('val_l01', info['vb_loss'], on_step=False, on_epoch=True)
-        self.log('val_l1', self.get_kl_t1(x).detach().item(), on_step=False, on_epoch=True)
-        self.log('val_ce_loss', info['ce_loss'], on_step=False, on_epoch=True)
+        self.log('val_l01', info['vb_loss'], on_step=False, on_epoch=True, sync_dist=True)
+        self.log('val_l1', self.get_kl_t1(x).detach().item(), on_step=False, on_epoch=True, sync_dist=True)
+        self.log('val_ce_loss', info['ce_loss'], on_step=False, on_epoch=True, sync_dist=True)
         loss_dict = {
             "val_ce_loss": info['ce_loss'],
             "val_l01": info['vb_loss'],

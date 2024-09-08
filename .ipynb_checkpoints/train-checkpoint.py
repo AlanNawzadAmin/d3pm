@@ -12,7 +12,7 @@ from omegaconf import OmegaConf
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 
-from d3pm_sc.unet import UNet, SimpleUNet
+from d3pm_sc.unet import UNet, KingmaUNet, SimpleUNet
 from d3pm_sc.dit import DiT_Llama
 
 from d3pm_sc.ct_sched_cond import ScheduleCondition
@@ -35,6 +35,7 @@ def train(cfg: DictConfig) -> None:
                  **nn_params
                 }
     nn_name_dict = {"SimpleUNet":SimpleUNet,
+                    "KingmaUNet":KingmaUNet,
                     "UNet":UNet,
                     "DiT_Llama":DiT_Llama}
     x0_model_class = nn_name_dict[cfg.architecture.x0_model_class]
@@ -52,12 +53,11 @@ def train(cfg: DictConfig) -> None:
         hybrid_loss_coeff=cfg.model.hybrid_loss_coeff,
         gamma=cfg.model.gamma,
         forward_kwargs=OmegaConf.to_container(cfg.model.forward_kwargs, resolve=True),
+        schedule_type=cfg.model.schedule_type,
         logistic_pars=cfg.model.logistic_pars,
         fix_x_t_bias=cfg.model.fix_x_t_bias,
         n_T=cfg.model.n_T,
-        lr=cfg.train.lr,
-        grad_clip_val=cfg.train.grad_clip_val,
-        weight_decay=cfg.train.weight_decay,
+        **OmegaConf.to_container(cfg.train, resolve=True),
     )
 
     ##### Load data
@@ -83,14 +83,16 @@ def train(cfg: DictConfig) -> None:
         return x, cond
     train_size = int(len(dataset) * 0.9)
     dataset, test_dataset = random_split(dataset, [train_size, len(dataset) - train_size])
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=16, collate_fn=collate_fn)
-    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=16, collate_fn=collate_fn)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=16//torch.cuda.device_count(), collate_fn=collate_fn)
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=16//torch.cuda.device_count(), collate_fn=collate_fn)
 
     ##### Train
+    wandb.init()
     wandb_logger = WandbLogger(project="debugging")
     lightning_model = model
+    torch.set_float32_matmul_precision('high')
     
-    trainer = Trainer(max_epochs=cfg.train.n_epoch, accelerator='auto', devices='auto', logger=wandb_logger)
+    trainer = Trainer(max_epochs=cfg.train.n_epoch, accelerator='auto', devices=torch.cuda.device_count(), logger=wandb_logger, strategy="ddp")
     trainer.fit(lightning_model, dataloader, test_dataloader)
     wandb.finish()
 

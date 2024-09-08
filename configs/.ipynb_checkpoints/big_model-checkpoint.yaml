@@ -1,6 +1,6 @@
 data:
     data: CIFAR10
-    N: 128
+    N: 256
     conditional: false
 
 model:
@@ -9,21 +9,21 @@ model:
     schedule_type: linear
     forward_kwargs:
         type: gaussian
-        normalized: false
-        bandwidth: 0.2
+        normalized: true
+        bandwidth: 0.14
     hybrid_loss_coeff: 0.01
-    logistic_pars: true
+    logistic_pars: false
     fix_x_t_bias: false
     n_T: 500
 
 architecture:
     s_dim: 4
     nn_params:
-    x0_model_class: SimpleUNet
+    x0_model_class: KingmaUNet
 
 train:
-    batch_size: 16
-    n_epoch: 14
+    batch_size: 32
+    n_epoch: 200
     lr: 0.0002
     grad_clip_val: 1
     weight_decay: 0
