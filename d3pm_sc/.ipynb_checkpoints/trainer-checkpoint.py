@@ -71,9 +71,9 @@ class DiffusionTrainer(pl.LightningModule):
             self.sample_x = x[:1]
         self.log('train_loss', info['vb_loss'])
         self.log('train_ce_loss', info['ce_loss'])
-        with torch.no_grad():
-            param_norm = sum([torch.norm(p) for p in self.parameters()])
-        self.log('param_norm', param_norm)
+        # with torch.no_grad():
+        #     param_norm = sum([torch.norm(p) for p in self.parameters()])
+        # self.log('param_norm', param_norm)
         return loss
 
     def validation_step(self, batch, batch_idx):
