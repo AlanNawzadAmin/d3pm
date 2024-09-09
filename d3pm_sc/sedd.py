@@ -86,7 +86,7 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
                  - pred_q_posterior_logits)
               + (true_q_posterior_logits * torch.log(F.relu(true_q_posterior_logits)+self.eps)
                  - true_q_posterior_logits))
-        vb_loss = kl.mean() * self.t_max
+        vb_loss = kl.sum(-1).mean() * self.t_max
 
         # Also calculate cross entropy loss
         predicted_x0_logits = predicted_x0_logits.flatten(start_dim=0, end_dim=-2)
