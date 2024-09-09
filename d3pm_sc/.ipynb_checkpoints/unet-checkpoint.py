@@ -66,7 +66,7 @@ class AttnBlock(nn.Module):
         super().__init__()
         self.channels = channels
         self.num_heads = num_heads
-        self.height = width # for compilation
+        self.height = width
         self.width = width
         self.head_dim = channels // self.num_heads
         self.norm = NormalizationLayer(channels)
@@ -190,7 +190,7 @@ class UNet(nn.Module):
         self.norm_out = NormalizationLayer(prev_out)
         self.conv_out = nn.Conv2d(prev_out, out_channels, 3, padding=1)
 
-    @torch.compile(fullgraph=True, dynamic=False)
+    # @torch.compile(fullgraph=True, dynamic=False)
     def unet_main(self, x, temb, yemb):
         # Downsampling
         h = self.conv_in(x)

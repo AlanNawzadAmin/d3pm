@@ -40,4 +40,7 @@ def get_inf_gens(forward_kwargs, num_classes):
     if "normalize" in forward_kwargs.keys():
         if forward_kwargs['normalize']:
             L = L / (- L.diagonal()[:, None])
+            range_ = torch.arange(num_classes)
+            L.diagonal().fill_(0)
+            L[range_, range_] = -L.sum(-1)
     return L
