@@ -22,6 +22,7 @@ from d3pm_sc.discrete_sc import DiscreteScheduleCondition
 
 @hydra.main(version_base=None, config_path="configs", config_name="basic")
 def train(cfg: DictConfig) -> None:
+    wandb.login(key="6a47f093d2a55e4f4e85b33767423f2db66355b8")
     ##### Setup x0_model
     schedule_conditioning = cfg.model.model in ["ScheduleCondition", "DiscreteScheduleCondition"]
     nn_params = cfg.architecture.nn_params
@@ -57,6 +58,7 @@ def train(cfg: DictConfig) -> None:
         logistic_pars=cfg.model.logistic_pars,
         fix_x_t_bias=cfg.model.fix_x_t_bias,
         n_T=cfg.model.n_T,
+        t_max=cfg.model.t_max,
         **OmegaConf.to_container(cfg.train, resolve=True),
     )
 

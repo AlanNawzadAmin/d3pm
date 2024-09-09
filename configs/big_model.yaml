@@ -15,6 +15,7 @@ model:
     logistic_pars: false
     fix_x_t_bias: false
     n_T: 500
+    t_max: 0.999999
 
 architecture:
     s_dim: 4
@@ -27,3 +28,4 @@ train:
     lr: 0.0002
     grad_clip_val: 1
     weight_decay: 0
+    gen_trans_step: 200

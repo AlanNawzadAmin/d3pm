@@ -27,6 +27,7 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
         schedule_type="cos",
         hybrid_loss_coeff=0.001,
         logistic_pars=False,
+        t_max=0.999,
         **kwargs
     ) -> None:
         super().__init__(**kwargs)
@@ -36,7 +37,7 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
         self.hybrid_loss_coeff = hybrid_loss_coeff
         self.eps = 1e-6
         self.num_classes = num_classes
-        self.t_max = 0.999
+        self.t_max = t_max
         self.logistic_pars = logistic_pars
 
         # Precalculate betas
