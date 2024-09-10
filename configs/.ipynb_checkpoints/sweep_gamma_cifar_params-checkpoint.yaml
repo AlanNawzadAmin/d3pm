@@ -9,6 +9,8 @@ metric:
   name: val_l01
   goal: minimize
 parameters:
+  model.seed:
+    values: [0, 1, 2]
   data.data:
     values: [CIFAR10]
   data.N:
@@ -19,8 +21,8 @@ parameters:
     values: [true, false]
   model.hybrid_loss_coeff:
     values: [0.0, 0.01, 0.1]
-  train.lr:
-    values: [0.001, 0.0001]
+  architecture.nn_params.time_embed_dim:
+    values: [0, 128]
   architecture.s_dim:
-    values: [2, 4, 8]
+    values: [2, 4, 8, 16]
     

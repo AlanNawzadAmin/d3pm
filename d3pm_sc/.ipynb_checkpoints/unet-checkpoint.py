@@ -93,7 +93,8 @@ class UNet(nn.Module):
     def __init__(self,
                  n_channel=3,
                  N=256,
-                 n_T=50,
+                 s_lengthscale=50,
+                 time_lengthscale=1,
                  schedule_conditioning=False,
                  s_dim=16,
                  ch=128,
@@ -112,7 +113,7 @@ class UNet(nn.Module):
         if schedule_conditioning:
             in_channels = n_channel + n_channel * s_dim
 
-            s = torch.arange(1000).reshape(-1, 1) * 1000 / n_T
+            s = torch.arange(1000).reshape(-1, 1) * 1000 / s_lengthscale
             emb_dim = s_dim//2
             semb = 10000**(-torch.arange(emb_dim)/(emb_dim-1))
             semb = torch.cat([torch.sin(s * semb), torch.cos(s * semb)], dim=1)
@@ -129,7 +130,7 @@ class UNet(nn.Module):
         self.num_res_blocks = num_res_blocks
         self.attn_resolutions = attn_resolutions
         self.num_classes = num_classes
-        self.n_T = n_T
+        self.time_lengthscale = time_lengthscale
         self.width = width
 
         # Time embedding
@@ -243,7 +244,7 @@ class UNet(nn.Module):
 
         # Time embedding   
         if self.time_embed_dim > 0:
-            t = t.float().reshape(-1, 1) * 1000 / self.n_T
+            t = t.float().reshape(-1, 1) * 1000 / self.time_lengthscale
             emb_dim = self.ch//2
             temb = 10000**(-torch.arange(emb_dim, device=t.device)/(emb_dim-1))
             temb = torch.cat([torch.sin(t * temb), torch.cos(t * temb)], dim=1)
@@ -270,7 +271,8 @@ class KingmaUNet(nn.Module):
     def __init__(self,
                  n_channel=3,
                  N=256,
-                 n_T=50,
+                 s_lengthscale=50,
+                 time_lengthscale=1,
                  schedule_conditioning=False,
                  s_dim=16,
                  ch=128,
@@ -289,7 +291,7 @@ class KingmaUNet(nn.Module):
         if schedule_conditioning:
             in_channels = ch * n_channel + n_channel * s_dim
 
-            s = torch.arange(1000).reshape(-1, 1) * 1000 / n_T
+            s = torch.arange(1000).reshape(-1, 1) * 1000 / s_lengthscale
             emb_dim = s_dim//2
             semb = 10000**(-torch.arange(emb_dim)/(emb_dim-1))
             semb = torch.cat([torch.sin(s * semb), torch.cos(s * semb)], dim=1)
@@ -305,7 +307,7 @@ class KingmaUNet(nn.Module):
         self.n_layers = n_layers
         self.inc_attn = inc_attn
         self.num_classes = num_classes
-        self.n_T = n_T
+        self.time_lengthscale = time_lengthscale
         self.width = width
 
         self.x_embed = nn.Embedding(N, ch)
@@ -394,7 +396,7 @@ class KingmaUNet(nn.Module):
 
         # Time embedding        
         if self.time_embed_dim > 0:
-            t = t.float().reshape(-1, 1) * 1000 / self.n_T
+            t = t.float().reshape(-1, 1) * 1000 / self.time_lengthscale
             emb_dim = self.ch//2
             temb = 10000**(-torch.arange(emb_dim, device=t.device)/(emb_dim-1))
             temb = torch.cat([torch.sin(t * temb), torch.cos(t * temb)], dim=1)

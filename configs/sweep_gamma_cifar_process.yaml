@@ -9,6 +9,8 @@ metric:
   name: val_l01
   goal: minimize
 parameters:
+  model.seed:
+    values: [0, 1, 2]
   data.data:
     values: [CIFAR10]
   data.N:
@@ -18,6 +20,4 @@ parameters:
   model.forward_kwargs.normalized:
       values: [true, false]
   model.forward_kwargs.bandwidth:
-      values: [0.1, 0.2, 0.4, 0.8]
-  train.lr:
-    values: [0.001, 0.0001]
+      values: [0.05, 0.1, 0.2, 0.4, 0.8]
