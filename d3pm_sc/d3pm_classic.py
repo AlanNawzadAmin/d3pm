@@ -115,10 +115,10 @@ class D3PMClassic(DiscreteTimeDiffusion):
             "ce_loss": ce_loss.detach().item(),
         }
 
-    def sample_with_image_sequence(self, x, cond=None, stride=10):
+    def sample_with_image_sequence(self, x, cond=None, trans_step=None, stride=10):
         steps = 0
         images = []
-        pbar = tqdm(np.arange(0, self.n_T)[::-1], position=0, leave=True)
+        pbar = tqdm(torch.flip(torch.linspace(0, self.t_max, self.n_T, dtype=torch.float32), (0,)), position=0, leave=True)
         for t in pbar:
             t = torch.tensor([t] * x.shape[0], device=x.device)
             x_next = self.p_sample(

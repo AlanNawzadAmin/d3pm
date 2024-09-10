@@ -65,7 +65,7 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         gumbel_noise = -torch.log(-torch.log(noise))
         return torch.argmax(logits + gumbel_noise, dim=-1)
 
-    def q_posterior_logits(self, x_0, x_t, t, S): # returns backward inf_gen
+    def r_posterior(self, x_0, x_t, t, S): # returns backward inf_gen
         x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
         softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
         p_y = torch.einsum("b...c,bcd->b...d", softmaxed, self.get_trans_mats(t))
@@ -78,14 +78,14 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         t, _, x_t = self.sample_point(x)
         # predict x_0 and prev(x_t)
         predicted_x0_logits = self.model_predict(x_t, t, cond, None)
-        true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, None)
-        pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x_t, t, None)
+        true_r_posterior = self.r_posterior(x, x_t, t, None)
+        pred_r_posterior = self.r_posterior(predicted_x0_logits, x_t, t, None)
 
         # get kls and loss
-        kl = (- (true_q_posterior_logits * torch.log(F.relu(pred_q_posterior_logits)+self.eps)
-                 - pred_q_posterior_logits)
-              + (true_q_posterior_logits * torch.log(F.relu(true_q_posterior_logits)+self.eps)
-                 - true_q_posterior_logits))
+        kl = (- (true_r_posterior * torch.log(F.relu(pred_r_posterior)+self.eps)
+                 - pred_r_posterior)
+              + (true_r_posterior * torch.log(F.relu(true_r_posterior)+self.eps)
+                 - true_r_posterior))
         vb_loss = kl.sum(-1).mean() * self.t_max
 
         # Also calculate cross entropy loss
@@ -101,26 +101,28 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
     def p_sample(self, x, t, cond, noise, delta_t, S=None):
         # predict prev(x_t) or x_{t-1}
         predicted_x0_logits = self.model_predict(x, t, cond,None)
-        bwd_inf_gen = self.q_posterior_logits(predicted_x0_logits, x, t,None)
-        pred_q_posterior_logits = torch.log(torch.matrix_exp(delta_t * bwd_inf_gen))
+        bwd_inf_gen = self.r_posterior(predicted_x0_logits, x, t,None)
+        x_0_logits = convert_to_distribution(x, self.num_classes, self.eps)
+        softmaxed = torch.softmax(x_0_logits, dim=-1)
+        pred_r_posterior = torch.log(softmaxed + delta_t * bwd_inf_gen)
         # sample
         noise = torch.clip(noise, self.eps, 1.0)
         not_first_step = (t != 0).float().reshape((x.shape[0], *[1] * (x.dim())))
         gumbel_noise = -torch.log(-torch.log(noise))
         sample = torch.argmax(
-            pred_q_posterior_logits + gumbel_noise * not_first_step, dim=-1
+            pred_r_posterior + gumbel_noise * not_first_step, dim=-1
         )
         return sample
 
 
-    def sample_with_image_sequence(self, x, cond=None, stride=10):
+    def sample_with_image_sequence(self, x, cond=None, trans_step=200, stride=10):
         steps = 0
         images = []
-        pbar = tqdm(np.arange(0, self.n_T)[::-1], position=0, leave=True)
+        pbar = tqdm(torch.flip(torch.linspace(0, self.t_max, trans_step, dtype=torch.float32), (0,)), position=0, leave=True)
         for t in pbar:
             t = torch.tensor([t] * x.shape[0], device=x.device)
             x_next = self.p_sample(
-                x, t, cond, torch.rand((*x.shape, self.num_classes), 1/self.n_T, device=x.device)
+                x, t, cond, torch.rand((*x.shape, self.num_classes), device=x.device), 1/trans_step
             )
             x = x_next
 
