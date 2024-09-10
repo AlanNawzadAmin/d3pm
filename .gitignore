@@ -9,6 +9,7 @@ outputs
 debugging
 wandb
 wandb
+.ipynb_checkpoints
 run.sh
 *.pyc
 ckpt

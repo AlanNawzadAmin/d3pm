@@ -94,6 +94,7 @@ class UNet(nn.Module):
                  schedule_conditioning=False,
                  s_dim=16,
                  ch=128,
+                 time_embed_dim=512,
                  num_classes=1,
                  ch_mult=(1, 2, 2, 2),
                  num_res_blocks=2,
@@ -127,7 +128,7 @@ class UNet(nn.Module):
         self.width = width
 
         # Time embedding
-        time_embed_dim = ch * 4
+        time_embed_dim = time_embed_dim
         self.time_embed = nn.Sequential(
             nn.Linear(ch, time_embed_dim),
             nn.SiLU(),
@@ -264,6 +265,7 @@ class KingmaUNet(nn.Module):
                  schedule_conditioning=False,
                  s_dim=16,
                  ch=128,
+                 time_embed_dim=128,
                  num_classes=1,
                  n_layers=32,
                  inc_attn=False,
@@ -297,7 +299,7 @@ class KingmaUNet(nn.Module):
 
         self.x_embed = nn.Embedding(N, ch)
         # Time embedding
-        time_embed_dim = ch * 4
+        time_embed_dim = time_embed_dim
         self.time_embed = nn.Sequential(
             nn.Linear(ch, time_embed_dim),
             nn.SiLU(),
