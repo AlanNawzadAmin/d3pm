@@ -18,11 +18,11 @@ parameters:
   model.forward_kwargs.type:
       value: uniform
   model.logistic_pars:
-    values: [true, false]
+    values: [false, true]
   model.hybrid_loss_coeff:
     values: [0.0, 0.01, 0.1]
   architecture.nn_params.time_embed_dim:
     values: [0, 128]
   architecture.s_dim:
-    values: [2, 4, 8, 16]
+    values: [4, 16, 64]
     

@@ -2,6 +2,8 @@ presetup.sh
 setup.sh
 cu122py310
 data
+slurm_scripts
+slurm_out
 test
 log
 scripts
