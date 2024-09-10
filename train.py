@@ -17,6 +17,7 @@ from d3pm_sc.dit import DiT_Llama
 
 from d3pm_sc.ct_sched_cond import ScheduleCondition
 from d3pm_sc.masking_diffusion import MaskingDiffusion
+from d3pm_sc.sedd import SEDD
 from d3pm_sc.d3pm_classic import D3PMClassic
 from d3pm_sc.discrete_sc import DiscreteScheduleCondition
 
@@ -45,6 +46,7 @@ def train(cfg: DictConfig) -> None:
     ##### Pick model
     model_name_dict = {"ScheduleCondition":ScheduleCondition,
                        "MaskingDiffusion":MaskingDiffusion,
+                       "SEDD": SEDD,
                        "DiscreteScheduleCondition":DiscreteScheduleCondition,
                        "D3PMClassic":D3PMClassic}
     model = model_name_dict[cfg.model.model](
@@ -59,6 +61,7 @@ def train(cfg: DictConfig) -> None:
         fix_x_t_bias=cfg.model.fix_x_t_bias,
         n_T=cfg.model.n_T,
         t_max=cfg.model.t_max,
+        seed=cfg.model.seed,
         **OmegaConf.to_container(cfg.train, resolve=True),
     )
 

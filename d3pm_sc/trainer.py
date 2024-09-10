@@ -45,7 +45,7 @@ def get_gif(sample_x, model, gen_trans_step, batch_size):
     
 
 class DiffusionTrainer(pl.LightningModule):
-    def __init__(self, lr=1e-3, gen_trans_step=200, n_gen_images=4, grad_clip_val=1, weight_decay=0, **kwargs):
+    def __init__(self, lr=1e-3, gen_trans_step=200, n_gen_images=4, grad_clip_val=1, weight_decay=0, seed=0, **kwargs):
         super().__init__()
         self.save_hyperparameters()
         self.lr = lr

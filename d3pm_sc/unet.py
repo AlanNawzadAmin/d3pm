@@ -35,7 +35,9 @@ class ResnetBlock(nn.Module):
         self.norm1 = NormalizationLayer(in_channels)
         self.norm2 = NormalizationLayer(out_channels)
         self.dropout = nn.Dropout(dropout)
-        self.temb_proj = nn.Linear(emb_dim, out_channels)
+        self.emb_dim = emb_dim
+        if emb_dim>0:
+            self.temb_proj = nn.Linear(emb_dim, out_channels)
         if cond:
             self.y_proj = nn.Linear(emb_dim, out_channels)
         
@@ -50,7 +52,8 @@ class ResnetBlock(nn.Module):
         h = self.conv1(h)
         
         # Add in timestep embedding
-        h = h + self.temb_proj(F.silu(temb))[:, :, None, None]
+        if self.emb_dim >0:
+            h = h + self.temb_proj(F.silu(temb))[:, :, None, None]
         
         # Add in class embedding
         if y is not None:
@@ -90,7 +93,7 @@ class UNet(nn.Module):
     def __init__(self,
                  n_channel=3,
                  N=256,
-                 n_T=1000,
+                 n_T=50,
                  schedule_conditioning=False,
                  s_dim=16,
                  ch=128,
@@ -109,11 +112,13 @@ class UNet(nn.Module):
         if schedule_conditioning:
             in_channels = n_channel + n_channel * s_dim
 
-            self.S_embed = nn.Embedding(n_T, s_dim)
-            self.S_embed.weight.data = torch.stack(
-                [torch.sin(torch.arange(n_T) * 3.1415 * 2**i) for i in range(s_dim // 2)] + 
-                [torch.cos(torch.arange(n_T) * 3.1415 * 2**i) for i in range(s_dim // 2)]
-            ).T
+            s = torch.arange(1000).reshape(-1, 1) * 1000 / n_T
+            emb_dim = s_dim//2
+            semb = 10000**(-torch.arange(emb_dim)/(emb_dim-1))
+            semb = torch.cat([torch.sin(s * semb), torch.cos(s * semb)], dim=1)
+        
+            self.S_embed = nn.Embedding(1000, s_dim)
+            self.S_embed.weight.data = semb
         else:
             in_channels= n_channel
         self.N = N
@@ -128,12 +133,13 @@ class UNet(nn.Module):
         self.width = width
 
         # Time embedding
-        time_embed_dim = time_embed_dim
-        self.time_embed = nn.Sequential(
-            nn.Linear(ch, time_embed_dim),
-            nn.SiLU(),
-            nn.Linear(time_embed_dim, time_embed_dim),
-        )
+        self.time_embed_dim = time_embed_dim
+        if self.time_embed_dim > 0:
+            self.time_embed = nn.Sequential(
+                nn.Linear(ch, time_embed_dim),
+                nn.SiLU(),
+                nn.Linear(time_embed_dim, time_embed_dim),
+            )
 
         # Class embedding
         self.cond = num_classes > 1 
@@ -235,12 +241,15 @@ class UNet(nn.Module):
 
             x = torch.cat([x, s_embed], dim=1)
 
-        # Time embedding        
-        t = t.float().reshape(-1, 1) * 1000 / self.n_T
-        emb_dim = self.ch//2
-        temb = 10000**(-torch.arange(emb_dim, device=t.device)/(emb_dim-1))
-        temb = torch.cat([torch.sin(t * temb), torch.cos(t * temb)], dim=1)
-        temb = self.time_embed(temb)
+        # Time embedding   
+        if self.time_embed_dim > 0:
+            t = t.float().reshape(-1, 1) * 1000 / self.n_T
+            emb_dim = self.ch//2
+            temb = 10000**(-torch.arange(emb_dim, device=t.device)/(emb_dim-1))
+            temb = torch.cat([torch.sin(t * temb), torch.cos(t * temb)], dim=1)
+            temb = self.time_embed(temb)
+        else:
+            temb = None
 
         # Class embedding
         if y is not None and self.num_classes > 1:
@@ -261,7 +270,7 @@ class KingmaUNet(nn.Module):
     def __init__(self,
                  n_channel=3,
                  N=256,
-                 n_T=1000,
+                 n_T=50,
                  schedule_conditioning=False,
                  s_dim=16,
                  ch=128,
@@ -280,11 +289,13 @@ class KingmaUNet(nn.Module):
         if schedule_conditioning:
             in_channels = ch * n_channel + n_channel * s_dim
 
-            self.S_embed = nn.Embedding(n_T, s_dim)
-            self.S_embed.weight.data = torch.stack(
-                [torch.sin(torch.arange(n_T) * 3.1415 * 2**i) for i in range(s_dim // 2)] + 
-                [torch.cos(torch.arange(n_T) * 3.1415 * 2**i) for i in range(s_dim // 2)]
-            ).T
+            s = torch.arange(1000).reshape(-1, 1) * 1000 / n_T
+            emb_dim = s_dim//2
+            semb = 10000**(-torch.arange(emb_dim)/(emb_dim-1))
+            semb = torch.cat([torch.sin(s * semb), torch.cos(s * semb)], dim=1)
+        
+            self.S_embed = nn.Embedding(1000, s_dim)
+            self.S_embed.weight.data = semb
         else:
             in_channels = ch * n_channel
         self.N = N
@@ -299,12 +310,13 @@ class KingmaUNet(nn.Module):
 
         self.x_embed = nn.Embedding(N, ch)
         # Time embedding
-        time_embed_dim = time_embed_dim
-        self.time_embed = nn.Sequential(
-            nn.Linear(ch, time_embed_dim),
-            nn.SiLU(),
-            nn.Linear(time_embed_dim, time_embed_dim),
-        )
+        self.time_embed_dim = time_embed_dim
+        if self.time_embed_dim > 0:
+            self.time_embed = nn.Sequential(
+                nn.Linear(ch, time_embed_dim),
+                nn.SiLU(),
+                nn.Linear(time_embed_dim, time_embed_dim),
+            )
 
         # Class embedding
         self.cond = num_classes > 1 
@@ -381,11 +393,14 @@ class KingmaUNet(nn.Module):
             x = torch.cat([x, s_embed], dim=1)
 
         # Time embedding        
-        t = t.float().reshape(-1, 1) * 1000 / self.n_T
-        emb_dim = self.ch//2
-        temb = 10000**(-torch.arange(emb_dim, device=t.device)/(emb_dim-1))
-        temb = torch.cat([torch.sin(t * temb), torch.cos(t * temb)], dim=1)
-        temb = self.time_embed(temb)
+        if self.time_embed_dim > 0:
+            t = t.float().reshape(-1, 1) * 1000 / self.n_T
+            emb_dim = self.ch//2
+            temb = 10000**(-torch.arange(emb_dim, device=t.device)/(emb_dim-1))
+            temb = torch.cat([torch.sin(t * temb), torch.cos(t * temb)], dim=1)
+            temb = self.time_embed(temb)
+        else:
+            temb = None
         
         # Class embedding
         if y is not None and self.num_classes > 1:
