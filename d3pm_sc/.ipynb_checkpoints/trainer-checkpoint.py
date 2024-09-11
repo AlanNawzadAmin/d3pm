@@ -17,7 +17,7 @@ def get_gif(sample_x, model, gen_trans_step, batch_size):
     init_noise = samples.reshape((batch_size,)+sample_x.shape[1:]).to(sample_x.device)
 
     images = model.sample_with_image_sequence(
-        init_noise, cond, stride=3, trans_step=gen_trans_step,
+        init_noise, cond, stride=3, n_T=gen_trans_step,
     )
     # image sequences to gif
     gif = []
