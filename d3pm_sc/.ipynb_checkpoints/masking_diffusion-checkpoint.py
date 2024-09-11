@@ -22,6 +22,8 @@ class MaskingDiffusion(ScheduleCondition): #schedule conditioning is True!
     ):
         forward_kwargs={"type":"uniform"}
         gamma = 1 / num_classes
+        if 'gamma' in kwargs:
+            del kwargs['gamma']
         super().__init__(x0_model_class, nn_params, num_classes, forward_kwargs, schedule_type, gamma, hybrid_loss_coeff,
                          fix_x_t_bias, logistic_pars, **kwargs)
         # with this choice, x_t_sample is uniform and 

@@ -10,11 +10,25 @@ metric:
 parameters:
   architecture.nn_params.time_embed_dim:
     value: 128
+  architecture.s_dim:
+    values:
+    - 4
+    - 16
+    - 64
   data.N:
-    value: 8
+    value: 128
   data.data:
     values:
     - CIFAR10
+  model.hybrid_loss_coeff:
+    values:
+    - 0.0
+    - 0.01
+    - 0.1
+  model.logistic_pars:
+    values:
+    - false
+    - true
   model.model:
     values:
     - MaskingDiffusion

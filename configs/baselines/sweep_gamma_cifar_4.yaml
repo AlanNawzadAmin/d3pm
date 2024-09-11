@@ -11,7 +11,7 @@ parameters:
   architecture.nn_params.time_embed_dim:
     value: 128
   data.N:
-    value: 8
+    value: 4
   data.data:
     values:
     - CIFAR10

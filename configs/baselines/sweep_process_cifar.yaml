@@ -11,10 +11,21 @@ parameters:
   architecture.nn_params.time_embed_dim:
     value: 128
   data.N:
-    value: 8
+    value: 128
   data.data:
     values:
     - CIFAR10
+  model.forward_kwargs.bandwidth:
+    values:
+    - 0.05
+    - 0.1
+    - 0.2
+    - 0.4
+    - 0.8
+  model.forward_kwargs.normalized:
+    values:
+    - true
+    - false
   model.model:
     values:
     - MaskingDiffusion
