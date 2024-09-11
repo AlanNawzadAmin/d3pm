@@ -30,7 +30,7 @@ def train(cfg: DictConfig) -> None:
     nn_params = (OmegaConf.to_container(nn_params, resolve=True)
                  if nn_params is not None else {})
     nn_params = {"n_channel": 1 if cfg.data.data == 'MNIST' else 3, 
-                 "N": cfg.data.N,
+                 "N": cfg.data.N + (cfg.model.model == 'MaskingDiffusion'),
                  "n_T": cfg.model.n_T,
                  "schedule_conditioning": schedule_conditioning,
                  "s_dim": cfg.architecture.s_dim,

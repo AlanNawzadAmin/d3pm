@@ -1,0 +1,29 @@
+command:
+- ${env}
+- python3
+- ${program}
+- ${args_no_hyphens}
+method: grid
+metric:
+  goal: minimize
+  name: val_l01
+parameters:
+  architecture.nn_params.schedule_conditioning:
+    value: false
+  architecture.nn_params.time_embed_dim:
+    value: 128
+  data.N:
+    value: 8
+  data.data:
+    values:
+    - CIFAR10
+  model.model:
+    values:
+    - MaskingDiffusion
+    - SEDD
+  model.seed:
+    values:
+    - 0
+    - 1
+    - 2
+program: train.py

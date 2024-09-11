@@ -112,6 +112,6 @@ class DiffusionTrainer(pl.LightningModule):
         return {
             "optimizer": optimizer,
             "gradient_clip_val": self.grad_clip_val,
-            "gradient_clip_val": self.weight_decay,
+            "weight_decay": self.weight_decay,
             "gradient_clip_algorithm": "norm"
         }
