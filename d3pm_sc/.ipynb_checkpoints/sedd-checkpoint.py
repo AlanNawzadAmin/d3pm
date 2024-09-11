@@ -115,10 +115,10 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         return sample
 
 
-    def sample_with_image_sequence(self, x, cond=None, trans_step=200, stride=10):
+    def sample_with_image_sequence(self, x, cond=None, n_T=200, stride=10):
         steps = 0
         images = []
-        pbar = tqdm(torch.flip(torch.linspace(0, self.t_max, trans_step, dtype=torch.float32), (0,)), position=0, leave=True)
+        pbar = tqdm(torch.flip(torch.linspace(0, self.t_max, n_T, dtype=torch.float32), (0,)), position=0, leave=True)
         for t in pbar:
             t = torch.tensor([t] * x.shape[0], device=x.device)
             x_next = self.p_sample(

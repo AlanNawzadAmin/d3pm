@@ -107,14 +107,16 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
             "ce_loss": ce_loss.detach().item(),
         }
 
-    def sample_with_image_sequence(self, x, cond=None, trans_step=1, stride=10):
+    def sample_with_image_sequence(self, x, cond=None, n_T=200, stride=10):
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
         S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
         S = S.swapaxes(0, 1).reshape(*x.shape).long()
         steps = 0
         images = []
-        pbar = tqdm(total=S.sum(-1).sum(-1).sum(-1).max().item(), unit="iteration",
+        n_steps = S.sum(-1).sum(-1).sum(-1).max().item()
+        pbar = tqdm(total=n_steps, unit="iteration",
                     position=0, leave=True)
+        trans_step = n_steps // n_T
         while S.sum() > 0:
             # predict what comes next
             x_next = self.p_sample(

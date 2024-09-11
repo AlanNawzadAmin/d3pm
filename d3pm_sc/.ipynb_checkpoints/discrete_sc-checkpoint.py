@@ -106,7 +106,7 @@ class DiscreteScheduleCondition(DiscreteTimeDiffusion): #schedule conditioning i
             "ce_loss": ce_loss.detach().item(),
         }
 
-    def sample_with_image_sequence(self, x, cond=None, trans_step=None, stride=10):
+    def sample_with_image_sequence(self, x, cond=None, n_T=None, stride=10):
         transitions = sample_full_transitions(self.beta_t.to(x.device), len(x.flatten())).reshape(x.shape + (-1,))
         Ss = torch.cumsum(transitions, -1).long()
         steps = 0

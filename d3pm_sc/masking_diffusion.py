@@ -24,6 +24,8 @@ class MaskingDiffusion(ScheduleCondition): #schedule conditioning is True!
         gamma = 1 / num_classes
         if 'gamma' in kwargs:
             del kwargs['gamma']
+        if 'forward_kwargs' in kwargs:
+            del kwargs['forward_kwargs']
         super().__init__(x0_model_class, nn_params, num_classes, forward_kwargs, schedule_type, gamma, hybrid_loss_coeff,
                          fix_x_t_bias, logistic_pars, **kwargs)
         # with this choice, x_t_sample is uniform and 
@@ -63,14 +65,16 @@ class MaskingDiffusion(ScheduleCondition): #schedule conditioning is True!
             "ce_loss": ce_loss.detach().item(),
         }
 
-    def sample_with_image_sequence(self, x, cond=None, trans_step=1, stride=10):
+    def sample_with_image_sequence(self, x, cond=None, n_T=200, stride=10):
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
         S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
         S = (S>0).swapaxes(0, 1).reshape(*x.shape).long() # this is the only line changed
         steps = 0
         images = []
-        pbar = tqdm(total=S.sum(-1).sum(-1).sum(-1).max().item(), unit="iteration",
+        n_steps = S.sum(-1).sum(-1).sum(-1).max().item()
+        pbar = tqdm(total=n_steps, unit="iteration",
                     position=0, leave=True)
+        trans_step = n_steps // n_T
         while S.sum() > 0:
             # predict what comes next
             x_next = self.p_sample(
