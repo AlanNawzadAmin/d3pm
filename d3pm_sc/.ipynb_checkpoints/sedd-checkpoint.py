@@ -122,7 +122,7 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         for t in pbar:
             t = torch.tensor([t] * x.shape[0], device=x.device)
             x_next = self.p_sample(
-                x, t, cond, torch.rand((*x.shape, self.num_classes), device=x.device), 1/trans_step
+                x, t, cond, torch.rand((*x.shape, self.num_classes), device=x.device), 1/n_T
             )
             x = x_next
 
