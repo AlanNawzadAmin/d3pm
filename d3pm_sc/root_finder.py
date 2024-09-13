@@ -39,7 +39,7 @@ def root_finder(func, x0, x1, ts, max_iter=100, tol=1e-6):
     
     return torch.where(torch.abs(f2) < tol, x2, torch.full_like(x2, float('nan')))
 
-def newton_root_finder(func, x0, ts, min_x=torch.tensor(1e-6), max_iter=100, tol=1e-6):
+def newton_root_finder(func, x0, ts, min_x=torch.tensor(1e-7), max_iter=100, tol=1e-6):
     ts = ts.detach()
     x = x0 * torch.ones_like(ts)
     x = torch.maximum(x, min_x)
@@ -49,7 +49,6 @@ def newton_root_finder(func, x0, ts, min_x=torch.tensor(1e-6), max_iter=100, tol
 
     for _ in range(max_iter):
         x_masked = x[mask].detach().requires_grad_(True)
-        # x_masked.requires_grad_(True)
         with torch.enable_grad():
             f_masked = func(x_masked, ts[mask])
             df_masked = torch.autograd.grad(f_masked.sum(), x_masked)[0]
@@ -66,4 +65,4 @@ def newton_root_finder(func, x0, ts, min_x=torch.tensor(1e-6), max_iter=100, tol
         if (~mask).all():
             break
 
-    return torch.where(torch.abs(f) < tol, x, torch.full_like(x, float('nan')))
+    return x#torch.where(torch.abs(f) < tol, x, torch.full_like(x, float('nan')))

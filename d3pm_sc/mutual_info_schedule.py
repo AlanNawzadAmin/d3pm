@@ -49,13 +49,18 @@ def get_a_b_func_sc(K, p0):
     second_eval = -second_eval.sort().values[-2]
     max_n = int(40 / second_eval)
     ent_p0 = -torch.xlogy(p0, p0).sum()
+    V_inv = torch.linalg.inv(V)
     def mi_p(n):
-        p = p0[:, None] * torch.matrix_power(K, n)
+        if n > 0:
+            mat = torch.real((V[None,:, :] * ((1+evals) ** n)) @ V_inv)
+        else:
+            mat = torch.eye(len(K), dtype=K.dtype)
+        p = p0[:, None] * mat
         return (torch.xlogy(p, p).sum(-1) - torch.xlogy(p.sum(-2), p.sum(-2))).sum(-1) / ent_p0 + 1
     precompute_mis = torch.tensor([mi_p(n) for n in range(max_n)])
     precompute_mis = torch.maximum(precompute_mis, torch.zeros(1))
-    max_n = (precompute_mis > 0).sum()
-    precompute_mis = precompute_mis[:max_n]
+    max_n = (precompute_mis > 1e-7).sum()
+    precompute_mis = torch.cummin(precompute_mis[:max_n], 0)[0]
     range_ = torch.arange(max_n, dtype=p0.dtype)
     precompute_log_factorial = torch.lgamma(1+range_)
     def mi(t, t_shift=1):
@@ -69,6 +74,7 @@ def get_a_b_func_sc(K, p0):
         # out = root_finder(mi, 0, 20/second_eval, ts)
         return -torch.where(out>1e-6, out, 1e-6)
     base_alphas = -log_alpha_naive(base_ts)
+    base_alphas = torch.cummax(base_alphas, 0)[0] # fix any errors
     def log_alpha(ts):
         closest_index = torch.searchsorted(base_ts, ts)
         best_guess_l = base_alphas[closest_index-1]
@@ -81,7 +87,7 @@ def get_a_b_func_sc(K, p0):
         out_tensor = -log_alpha(ts)
         grad = -1 / torch.func.grad(lambda o: mi(o).sum())(out_tensor)
         return grad
-    return log_alpha, beta, mi
+    return log_alpha, beta, mi, precompute_mis
 
 def get_a_b_func_mi(mat, p0, type_, **kwargs):
     if type_ == 'schedule_condition':
