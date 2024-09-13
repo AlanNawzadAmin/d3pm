@@ -5,7 +5,7 @@ data:
 
 model:
     seed: 0
-    model: ScheduleCondition
+    model: mutual_information
     gamma: 0
     schedule_type: linear
     forward_kwargs:
@@ -16,7 +16,7 @@ model:
     logistic_pars: false
     fix_x_t_bias: false
     n_T: 500
-    t_max: 0.999999
+    t_max: 0.999
 
 architecture:
     s_dim: 4

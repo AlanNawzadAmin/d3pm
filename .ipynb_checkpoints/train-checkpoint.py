@@ -91,6 +91,8 @@ def train(cfg: DictConfig) -> None:
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=16//torch.cuda.device_count(), collate_fn=collate_fn)
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=16//torch.cuda.device_count(), collate_fn=collate_fn)
 
+    model.pre_configure_model(dataloader)
+    
     ##### Train
     wandb.init()
     wandb_logger = WandbLogger(project="debugging")
