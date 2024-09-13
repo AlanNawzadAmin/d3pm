@@ -1,0 +1,26 @@
+program: train.py
+method: grid
+command:
+  - ${env}
+  - python3
+  - ${program}
+  - ${args_no_hyphens}
+metric:
+  name: val_l01
+  goal: minimize
+parameters:
+  model.seed:
+    values: [0, 1, 2]
+  data.data:
+    values: [CIFAR10]
+  data.N:
+    value: 128
+  model.forward_kwargs.type:
+      value: uniform
+  model.logistic_pars:
+    values: [false, true]
+  architecture.nn_params.time_embed_dim:
+    values: [0, 128]
+  architecture.s_dim:
+    values: [64, 128]
+    
