@@ -6,17 +6,23 @@ from .trainer import DiffusionTrainer
 
 from .schedule_sample import sample_n_transitions, sample_full_transitions
 from .schedule_sample import sample_n_transitions_cont
+from d3pm_sc.mutual_info_schedule import get_a_b_func_mi
 
 def get_betas(schedule_type):
-    if schedule_type == 'cos':
-        alpha = lambda t: 1-torch.cos((1 - t) * torch.pi / 2)
-        alpha_prime = lambda t: -torch.sin((1 - t) * torch.pi / 2) * torch.pi / 2
-    if schedule_type == 'linear':
-        alpha = lambda t: 1-t
-        alpha_prime = lambda t: -1
-    beta = lambda t: - alpha_prime(t) / alpha(t)
-    log_alpha = lambda t: torch.log(alpha(t))
-    return log_alpha, beta
+    if schedule_type in ['cos', 'linear']:
+        def get_funcs(L, p0, scale=1, type_=None):
+            if schedule_type == 'cos':
+                alpha = lambda t: 1-torch.cos((1 - t) * torch.pi / 2)
+                alpha_prime = lambda t: -torch.sin((1 - t) * torch.pi / 2) * torch.pi / 2
+            if schedule_type == 'linear':
+                alpha = lambda t: 1-t
+                alpha_prime = lambda t: -1
+            beta = lambda t: - scale * alpha_prime(t) / alpha(t)
+            log_alpha = lambda t: scale * torch.log(alpha(t))
+            return log_alpha, beta
+    elif schedule_type in ['mutual_information']:
+        return get_a_b_func_mi
+    return get_funcs
 
 class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
     def __init__(
@@ -41,7 +47,7 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
         self.logistic_pars = logistic_pars
 
         # Precalculate betas
-        self.log_alpha, self.beta = get_betas(schedule_type)
+        self.get_beta_func = get_betas(schedule_type)
 
     def get_stationary(self):
         raise NotImplementedError

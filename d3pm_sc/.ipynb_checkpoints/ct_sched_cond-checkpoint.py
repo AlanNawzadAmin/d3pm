@@ -31,14 +31,15 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         L = get_inf_gens(forward_kwargs, num_classes)
         rate = - (L.diagonal().min()) / (1-gamma) # L^* in sec 6.6 of the notes
         K = L / rate + torch.eye(num_classes)
-        self.beta_scale = self.beta
-        self.beta = lambda t: rate * self.beta_scale(t)
-        self.log_alpha_scale = self.log_alpha
-        self.log_alpha  = lambda t: self.log_alpha_scale(t) * rate
         K_powers = torch.stack([torch.linalg.matrix_power(K, i) for i in range(500)])
+        self.rate = rate
         self.register_buffer("K", K)
         self.register_buffer("K_powers", K_powers)
 
+    def pre_configure_model(self, dataloader):
+        self.calc_p0(dataloader)
+        self.log_alpha, self.beta, *_ = self.get_beta_func(self.K, self.p0, type_='schedule_condition', scale=self.rate)
+    
     def get_stationary(self):
         evals, evecs = torch.linalg.eig(self.K.T)
         norms_sq = torch.real(evals * evals.conj())

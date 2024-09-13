@@ -7,6 +7,7 @@ import torch
 import torch.optim as optim
 from PIL import Image
 from torchvision.utils import make_grid
+import torch.nn.functional as F
 
 
 def get_gif(sample_x, model, gen_trans_step, batch_size):
@@ -62,6 +63,21 @@ class DiffusionTrainer(pl.LightningModule):
 
     def get_kl_t1(self, x):
         return NotImplementedError
+
+    def pre_configure_model(self, dataloader):
+        pass
+
+    def calc_p0(self, dataloader):
+        # get stationary dist
+        p0 = torch.ones(self.num_classes)
+        for i, batch in enumerate(dataloader):
+            if p0.sum() > self.num_classes * 10000:  
+                break
+            x, _ = batch
+            p0 = p0 + F.one_hot(x.long(), num_classes=self.num_classes).float().view((-1, self.num_classes)).sum(0)
+        p0 = p0 / p0.sum()
+        self.p0 = p0
+        # self.register_buffer("p0", p0)
 
     def training_step(self, batch, batch_idx):
         x, cond = batch

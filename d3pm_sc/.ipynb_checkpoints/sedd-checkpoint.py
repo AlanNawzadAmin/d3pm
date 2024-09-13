@@ -32,6 +32,10 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         L = get_inf_gens(forward_kwargs, num_classes)
         self.register_buffer("L", L)
 
+    def pre_configure_model(self, dataloader):
+        self.calc_p0(dataloader)
+        self.log_alpha, self.beta, *_ = self.get_beta_func(self.L, self.p0, 'SEDD')
+        
     def get_stationary(self):
         evals, evecs = torch.linalg.eig(self.L.T)
         norms_sq = torch.real(evals)
