@@ -28,17 +28,17 @@ def get_a_b_func_cont(L, p0):
         return -torch.where(out>1e-6, out, 1e-6)
     base_alphas = -log_alpha_naive(base_ts)
     def log_alpha(ts):
-        closest_index = torch.searchsorted(base_ts, ts)
+        closest_index = torch.searchsorted(base_ts, ts.to('cpu'))
         best_guess_l = base_alphas[closest_index-1]
         best_guess_u = base_alphas[closest_index]
         out = newton_root_finder(mi, best_guess_l, ts)
         # out = root_finder(mi, best_guess_l, best_guess_u, ts)
-        return -torch.where(out>1e-6, out, 1e-6)
+        return -torch.where(out>1e-6, out, 1e-6).to(ts.device)
     
     def beta(ts):
-        out_tensor = -log_alpha(ts)
+        out_tensor = -log_alpha(ts.to('cpu'))
         grad = -1 / torch.func.grad(lambda o: mi(o).sum())(out_tensor)
-        return grad
+        return grad.to(ts.device)
     return log_alpha, beta, mi
 
 
@@ -76,17 +76,17 @@ def get_a_b_func_sc(K, p0):
     base_alphas = -log_alpha_naive(base_ts)
     base_alphas = torch.cummax(base_alphas, 0)[0] # fix any errors
     def log_alpha(ts):
-        closest_index = torch.searchsorted(base_ts, ts)
+        closest_index = torch.searchsorted(base_ts, ts.to('cpu'))
         best_guess_l = base_alphas[closest_index-1]
         best_guess_u = base_alphas[closest_index]
-        out = newton_root_finder(mi, best_guess_l, ts)
+        out = newton_root_finder(mi, best_guess_l, ts.to('cpu'))
         # out = root_finder(mi, best_guess_l, best_guess_u, ts)
-        return -torch.where(out>1e-6, out, 1e-6)
+        return -torch.where(out>1e-6, out, 1e-6).to(ts.device)
     
     def beta(ts):
-        out_tensor = -log_alpha(ts)
+        out_tensor = -log_alpha(ts.to('cpu'))
         grad = -1 / torch.func.grad(lambda o: mi(o).sum())(out_tensor)
-        return grad
+        return grad.to(ts.device)
     return log_alpha, beta, mi, precompute_mis
 
 def get_a_b_func_mi(mat, p0, type_, **kwargs):

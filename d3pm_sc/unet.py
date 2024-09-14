@@ -106,6 +106,7 @@ class UNet(nn.Module):
                  dropout=0.1,
                  num_heads=1,
                  width=32,
+                 logistic_pars=True,
                  **kwargs
                 ):
         super().__init__()
@@ -132,6 +133,7 @@ class UNet(nn.Module):
         self.num_classes = num_classes
         self.time_lengthscale = time_lengthscale
         self.width = width
+        self.logistic_pars = logistic_pars
 
         # Time embedding
         self.time_embed_dim = time_embed_dim
@@ -262,7 +264,7 @@ class UNet(nn.Module):
         B, C, H, W, _ = x_onehot.shape
         h = self.unet_main(x, temb, yemb)
         h = h[:, :, :H, :W].reshape(B, C, self.N, H, W).permute((0, 1, 3, 4, 2))
-        return x_onehot + h
+        return h + self.logistic_pars * x_onehot
 
 ########################
 
@@ -284,6 +286,7 @@ class KingmaUNet(nn.Module):
                  num_heads=1,
                  n_transformers=1,
                  width=32,
+                 logistic_pars=True,
                  **kwargs
                 ):
         super().__init__()
@@ -309,6 +312,7 @@ class KingmaUNet(nn.Module):
         self.num_classes = num_classes
         self.time_lengthscale = time_lengthscale
         self.width = width
+        self.logistic_pars = logistic_pars
 
         self.x_embed = nn.Embedding(N, ch)
         # Time embedding
@@ -414,7 +418,7 @@ class KingmaUNet(nn.Module):
         B, C, H, W, _ = x_onehot.shape
         h = self.flat_unet(x, temb, yemb)
         h = h[:, :, :H, :W].reshape(B, C, self.N, H, W).permute((0, 1, 3, 4, 2))
-        return x_onehot + h
+        return h + self.logistic_pars * x_onehot
 
 ########################
 
