@@ -44,15 +44,15 @@ class ResnetBlock(nn.Module):
         self.film = film
         if emb_dim>0:
             self.temb_proj = nn.Linear(emb_dim, out_channels)
-            if film:
+            if self.film:
                 self.temb_proj_mult = nn.Linear(emb_dim, out_channels)
         if semb_dim>0:
             self.semb_proj = nn.Linear(semb_dim, out_channels)
-            if film:
+            if self.film:
                 self.semb_proj_mult = nn.Linear(semb_dim, out_channels)
         if cond:
             self.y_proj = nn.Linear(emb_dim, out_channels)
-            if film:
+            if self.film:
                 self.y_proj_mult = nn.Linear(emb_dim, out_channels)
         
         if in_channels != out_channels:
@@ -80,7 +80,7 @@ class ResnetBlock(nn.Module):
             else:
                 gam = 1
             bet = self.semb_proj(F.silu(semb.transpose(-1, -3))).transpose(-1, -3)
-            h = h + bet
+            h = gam * h + bet
         
         # Add in class embedding
         if y is not None:
@@ -204,7 +204,7 @@ class UNet(nn.Module):
             block = nn.ModuleList()
             out_ch = ch * ch_mult[i_level]
             for _ in range(self.num_res_blocks):
-                block.append(ResnetBlock(in_ch, out_ch, time_embed_dim, dropout, self.cond, film))
+                block.append(ResnetBlock(in_ch, out_ch, time_embed_dim, dropout, cond=self.cond, film=film))
                 in_ch = out_ch
                 if i_level in attn_resolutions:
                     block.append(AttnBlock(in_ch, self.width//(2**i_level), num_heads))
@@ -217,9 +217,9 @@ class UNet(nn.Module):
             self.down_blocks.append(block)
 
         # Middle
-        self.mid_block1 = ResnetBlock(in_ch, in_ch, time_embed_dim, dropout, self.cond, film)
+        self.mid_block1 = ResnetBlock(in_ch, in_ch, time_embed_dim, dropout, cond=self.cond, film=film)
         self.mid_attn = AttnBlock(in_ch, self.width//(2**i_level), num_heads)
-        self.mid_block2 = ResnetBlock(in_ch, in_ch, time_embed_dim, dropout, self.cond, film)
+        self.mid_block2 = ResnetBlock(in_ch, in_ch, time_embed_dim, dropout, cond=self.cond, film=film)
 
         # Upsampling
         self.up_blocks = nn.ModuleList()
@@ -229,7 +229,7 @@ class UNet(nn.Module):
             out_ch = ch * ch_mult[i_level]
             for j in range(self.num_res_blocks + 1):
                 in_ch = ch * ((1,)+ch_mult)[i_level + 1 - (j==self.num_res_blocks)]
-                block.append(ResnetBlock(in_ch + prev_out, out_ch, time_embed_dim, dropout, self.cond, film))
+                block.append(ResnetBlock(in_ch + prev_out, out_ch, time_embed_dim, dropout, cond=self.cond, film=film))
                 prev_out = out_ch
                 if i_level in attn_resolutions:
                     block.append(AttnBlock(prev_out, self.width//(2**i_level), num_heads))
@@ -401,7 +401,7 @@ class KingmaUNet(nn.Module):
         self.down_blocks = nn.ModuleList()
         for i_level in range(self.n_layers):
             block = nn.ModuleList()
-            block.append(ResnetBlock(ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond, film))
+            block.append(ResnetBlock(ch, ch, time_embed_dim, dropout, s_embed_dim, cond=self.cond, film=film))
             if self.inc_attn:
                 block.append(AttnBlock(ch, width, num_heads))
             else:
@@ -409,16 +409,16 @@ class KingmaUNet(nn.Module):
             self.down_blocks.append(block)
 
         # Middle
-        self.mid_block1 = ResnetBlock(ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond, film)
+        self.mid_block1 = ResnetBlock(ch, ch, time_embed_dim, dropout, s_embed_dim, cond=self.cond, film=film)
         self.mid_attn = nn.Sequential(*[AttnBlock(ch, width, num_heads)
                                         for i in range(n_transformers)])
-        self.mid_block2 = ResnetBlock(ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond, film)
+        self.mid_block2 = ResnetBlock(ch, ch, time_embed_dim, dropout, s_embed_dim, cond=self.cond, film=film)
 
         # Upsampling
         self.up_blocks = nn.ModuleList()
         for i_level in range(self.n_layers+1):
             block = nn.ModuleList()
-            block.append(ResnetBlock(2 * ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond, film))
+            block.append(ResnetBlock(2 * ch, ch, time_embed_dim, dropout, s_embed_dim, cond=self.cond, film=film))
             if self.inc_attn:
                 block.append(AttnBlock(ch, width, num_heads))
             else:
