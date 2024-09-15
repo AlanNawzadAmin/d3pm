@@ -19,6 +19,8 @@ parameters:
       value: uniform
   architecture.nn_params.semb_style:
     value: u_inject
+  architecture.nn_params.time_embed_dim:
+    values: [0, 128]
   architecture.nn_params.film:
     values: [true, false]
     

@@ -20,5 +20,7 @@ parameters:
   architecture.nn_params.time_embed_dim:
     values: [0, 128]
   architecture.nn_params.semb_style:
-    values: [learn_embed, learn_nn, u_inject]
+    value: u_inject
+  architecture.x0_model_class:
+    value: GigaUNet
     

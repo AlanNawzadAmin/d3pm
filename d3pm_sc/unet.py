@@ -68,7 +68,7 @@ class ResnetBlock(nn.Module):
         # Add in timestep embedding
         if self.emb_dim > 0:
             if self.film:
-                gam = self.temb_proj_mult(F.silu(temb))[:, :, None, None]
+                gam = 1 + self.temb_proj_mult(F.silu(temb))[:, :, None, None]
             else:
                 gam = 1
             bet = self.temb_proj(F.silu(temb))[:, :, None, None]
@@ -76,7 +76,7 @@ class ResnetBlock(nn.Module):
 
         if self.semb_dim > 0:
             if self.film:
-                gam = self.semb_proj_mult(F.silu(semb.transpose(-1, -3))).transpose(-1, -3)
+                gam = 1 + self.semb_proj_mult(F.silu(semb.transpose(-1, -3))).transpose(-1, -3)
             else:
                 gam = 1
             bet = self.semb_proj(F.silu(semb.transpose(-1, -3))).transpose(-1, -3)
@@ -85,7 +85,7 @@ class ResnetBlock(nn.Module):
         # Add in class embedding
         if y is not None:
             if self.film:
-                gam = self.y_proj_mult(y)[:, :, None, None]
+                gam = 1 + self.y_proj_mult(y)[:, :, None, None]
             else:
                 gam = 1
             bet = self.y_proj(y)[:, :, None, None]
@@ -131,6 +131,7 @@ class UNet(nn.Module):
                  s_dim=16,
                  ch=128,
                  time_embed_dim=512,
+                 s_embed_dim=512,
                  num_classes=1,
                  ch_mult=(1, 2, 2, 2),
                  num_res_blocks=2,
@@ -140,6 +141,7 @@ class UNet(nn.Module):
                  width=32,
                  logistic_pars=True,
                  semb_style="learn_embed", # "learn_nn"
+                 film=False,
                  **kwargs
                 ):
         super().__init__()
@@ -155,7 +157,6 @@ class UNet(nn.Module):
             self.S_embed_sinusoid = nn.Embedding(1000, s_dim)
             self.S_embed_sinusoid.weight.data = semb
             if semb_style!="learn_embed":
-                s_embed_dim = time_embed_dim
                 in_channels = n_channel + s_embed_dim
                 freeze_layer(self.S_embed_sinusoid)
                 self.S_embed_nn = nn.Sequential(
@@ -203,7 +204,7 @@ class UNet(nn.Module):
             block = nn.ModuleList()
             out_ch = ch * ch_mult[i_level]
             for _ in range(self.num_res_blocks):
-                block.append(ResnetBlock(in_ch, out_ch, time_embed_dim, dropout, self.cond))
+                block.append(ResnetBlock(in_ch, out_ch, time_embed_dim, dropout, self.cond, film))
                 in_ch = out_ch
                 if i_level in attn_resolutions:
                     block.append(AttnBlock(in_ch, self.width//(2**i_level), num_heads))
@@ -216,9 +217,9 @@ class UNet(nn.Module):
             self.down_blocks.append(block)
 
         # Middle
-        self.mid_block1 = ResnetBlock(in_ch, in_ch, time_embed_dim, dropout, self.cond)
+        self.mid_block1 = ResnetBlock(in_ch, in_ch, time_embed_dim, dropout, self.cond, film)
         self.mid_attn = AttnBlock(in_ch, self.width//(2**i_level), num_heads)
-        self.mid_block2 = ResnetBlock(in_ch, in_ch, time_embed_dim, dropout, self.cond)
+        self.mid_block2 = ResnetBlock(in_ch, in_ch, time_embed_dim, dropout, self.cond, film)
 
         # Upsampling
         self.up_blocks = nn.ModuleList()
@@ -228,7 +229,7 @@ class UNet(nn.Module):
             out_ch = ch * ch_mult[i_level]
             for j in range(self.num_res_blocks + 1):
                 in_ch = ch * ((1,)+ch_mult)[i_level + 1 - (j==self.num_res_blocks)]
-                block.append(ResnetBlock(in_ch + prev_out, out_ch, time_embed_dim, dropout, self.cond))
+                block.append(ResnetBlock(in_ch + prev_out, out_ch, time_embed_dim, dropout, self.cond, film))
                 prev_out = out_ch
                 if i_level in attn_resolutions:
                     block.append(AttnBlock(prev_out, self.width//(2**i_level), num_heads))
@@ -326,6 +327,7 @@ class KingmaUNet(nn.Module):
                  s_dim=16,
                  ch=128,
                  time_embed_dim=128,
+                 s_embed_dim=128,
                  num_classes=1,
                  n_layers=32,
                  inc_attn=False,
@@ -335,6 +337,7 @@ class KingmaUNet(nn.Module):
                  width=32,
                  logistic_pars=True,
                  semb_style="learn_embed", # "learn_nn", "u_inject"
+                 film=False,
                  **kwargs
                 ):
         super().__init__()
@@ -350,7 +353,6 @@ class KingmaUNet(nn.Module):
             self.S_embed_sinusoid = nn.Embedding(1000, s_dim)
             self.S_embed_sinusoid.weight.data = semb
             if semb_style != "learn_embed":
-                s_embed_dim = time_embed_dim
                 in_channels = ch * n_channel + s_embed_dim
                 freeze_layer(self.S_embed_sinusoid)
                 self.S_embed_nn = nn.Sequential(
@@ -399,7 +401,7 @@ class KingmaUNet(nn.Module):
         self.down_blocks = nn.ModuleList()
         for i_level in range(self.n_layers):
             block = nn.ModuleList()
-            block.append(ResnetBlock(ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond))
+            block.append(ResnetBlock(ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond, film))
             if self.inc_attn:
                 block.append(AttnBlock(ch, width, num_heads))
             else:
@@ -407,16 +409,16 @@ class KingmaUNet(nn.Module):
             self.down_blocks.append(block)
 
         # Middle
-        self.mid_block1 = ResnetBlock(ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond)
+        self.mid_block1 = ResnetBlock(ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond, film)
         self.mid_attn = nn.Sequential(*[AttnBlock(ch, width, num_heads)
                                         for i in range(n_transformers)])
-        self.mid_block2 = ResnetBlock(ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond)
+        self.mid_block2 = ResnetBlock(ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond, film)
 
         # Upsampling
         self.up_blocks = nn.ModuleList()
         for i_level in range(self.n_layers+1):
             block = nn.ModuleList()
-            block.append(ResnetBlock(2 * ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond))
+            block.append(ResnetBlock(2 * ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond, film))
             if self.inc_attn:
                 block.append(AttnBlock(ch, width, num_heads))
             else:
@@ -444,6 +446,218 @@ class KingmaUNet(nn.Module):
         # Upsampling
         for i, blocks in enumerate(self.up_blocks):
             h = blocks[0](torch.cat([h, hs[self.n_layers-(i+1)]], dim=1), temb, yemb, semb)
+            h = blocks[1](h)
+
+        h = F.silu(self.norm_out(h))
+        h = self.conv_out(h)
+        return h
+    
+    def forward(self, x, t, y=None, S=None):
+        x_onehot = F.one_hot(x.long(), num_classes=self.N).float()
+        x = self.x_embed(x.permute(0,2,3,1))
+        x = x.reshape(*x.shape[:-2], -1).permute(0,3,1,2)
+
+        # S embedding
+        if S is not None:
+            semb = self.S_embed_sinusoid(S.permute(0,2,3,1))
+            semb = self.S_embed_nn(semb.reshape(*semb.shape[:-2], -1)).permute(0,3,1,2)
+
+            x = torch.cat([x, semb], dim=1)
+        else:
+            semb = None
+
+        # Time embedding        
+        if self.time_embed_dim > 0:
+            t = t.float().reshape(-1, 1) * 1000 / self.time_lengthscale
+            emb_dim = self.ch//2
+            temb = 10000**(-torch.arange(emb_dim, device=t.device)/(emb_dim-1))
+            temb = torch.cat([torch.sin(t * temb), torch.cos(t * temb)], dim=1)
+            temb = self.time_embed(temb)
+        else:
+            temb = None
+        
+        # Class embedding
+        if y is not None and self.num_classes > 1:
+            yemb = self.class_embed(y)
+        else:
+            yemb = None
+        
+        # Reshape output and add to x_onehot
+        B, C, H, W, _ = x_onehot.shape
+        h = self.flat_unet(x, temb, yemb, semb)
+        h = h[:, :, :H, :W].reshape(B, C, self.N, H, W).permute((0, 1, 3, 4, 2))
+        return h + self.logistic_pars * x_onehot
+
+
+########################
+
+class GigaUNet(nn.Module):
+    def __init__(self,
+                 n_channel=3,
+                 N=256,
+                 s_lengthscale=50,
+                 time_lengthscale=1,
+                 schedule_conditioning=False,
+                 s_dim=16,
+                 ch=128,
+                 time_embed_dim=128,
+                 s_embed_dim=128,
+                 num_classes=1,
+                 n_layers=32,
+                 inc_attn=False,
+                 dropout=0.1,
+                 num_heads=1,
+                 n_transformers=1,
+                 width=32,
+                 logistic_pars=True,
+                 semb_style="u_inject", # "learn_nn", "u_inject"
+                 film=False,
+                 **kwargs
+                ):
+        super().__init__()
+
+        if schedule_conditioning:
+            in_channels = ch * n_channel + n_channel * s_dim
+
+            s = torch.arange(1000).reshape(-1, 1) * 1000 / s_lengthscale
+            emb_dim = s_dim//2
+            semb = 10000**(-torch.arange(emb_dim)/(emb_dim-1))
+            semb = torch.cat([torch.sin(s * semb), torch.cos(s * semb)], dim=1)
+        
+            self.S_embed_sinusoid = nn.Embedding(1000, s_dim)
+            self.S_embed_sinusoid.weight.data = semb
+            if semb_style != "learn_embed":
+                in_channels = ch * n_channel + s_embed_dim
+                freeze_layer(self.S_embed_sinusoid)
+                self.S_embed_nn = nn.Sequential(
+                    nn.Linear(n_channel * s_dim, s_embed_dim),
+                    nn.SiLU(),
+                    nn.Linear(s_embed_dim, s_embed_dim),
+                )
+            else:
+                s_embed_dim = 0
+                self.S_embed_nn = nn.Identity()
+            if semb_style != "u_inject":
+                s_embed_dim = 0
+        else:
+            s_embed_dim = 0
+            in_channels = ch * n_channel
+        assert s_embed_dim != 0
+        self.N = N
+        self.n_channel = n_channel
+        out_channels = n_channel * N 
+        self.ch = ch
+        self.n_layers = n_layers
+        self.inc_attn = inc_attn
+        self.num_classes = num_classes
+        self.time_lengthscale = time_lengthscale
+        self.width = width
+        self.logistic_pars = logistic_pars
+
+        self.x_embed = nn.Embedding(N, ch)
+        # Time embedding
+        self.time_embed_dim = time_embed_dim
+        if self.time_embed_dim > 0:
+            self.time_embed = nn.Sequential(
+                nn.Linear(ch, time_embed_dim),
+                nn.SiLU(),
+                nn.Linear(time_embed_dim, time_embed_dim),
+            )
+
+        # Class embedding
+        self.cond = num_classes > 1 
+        if self.cond:
+            self.class_embed = nn.Embedding(num_classes, time_embed_dim)
+        else:
+            self.class_embed = None
+
+        # Downsampling
+        self.conv_in = nn.Conv2d(in_channels, ch, 3, padding=1)
+        self.conv_in_S = nn.Conv2d(s_embed_dim, ch, 3, padding=1)
+        self.down_blocks = nn.ModuleList()
+        for i_level in range(self.n_layers):
+            block = nn.ModuleList()
+            block.append(ResnetBlock(ch, ch, time_embed_dim, dropout, ch, self.cond, film))
+            if self.inc_attn:
+                block.append(AttnBlock(ch, width, num_heads))
+            else:
+                block.append(nn.Identity())
+            self.down_blocks.append(block)
+        self.down_blocks_S = nn.ModuleList()
+        for i_level in range(self.n_layers):
+            block = nn.ModuleList()
+            block.append(ResnetBlock(ch, ch, time_embed_dim, dropout, 0, self.cond, film))
+            if self.inc_attn:
+                block.append(AttnBlock(ch, width, num_heads))
+            else:
+                block.append(nn.Identity())
+            self.down_blocks_S.append(block)
+
+        # Middle
+        self.mid_block1 = ResnetBlock(ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond, film)
+        self.mid_attn = nn.Sequential(*[AttnBlock(ch, width, num_heads)
+                                        for i in range(n_transformers)])
+        self.mid_block2 = ResnetBlock(ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond, film)
+
+        # Middle S
+        self.mid_block1_S = ResnetBlock(ch, ch, time_embed_dim, dropout, 0, self.cond, film)
+        self.mid_attn_S = nn.Sequential(*[AttnBlock(ch, width, num_heads)
+                                        for i in range(n_transformers)])
+        self.mid_block2_S = ResnetBlock(ch, ch, time_embed_dim, dropout, 0, self.cond, film)
+
+        # Upsampling
+        self.up_blocks = nn.ModuleList()
+        for i_level in range(self.n_layers+1):
+            block = nn.ModuleList()
+            block.append(ResnetBlock(2 * ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond, film))
+            if self.inc_attn:
+                block.append(AttnBlock(ch, width, num_heads))
+            else:
+                block.append(nn.Identity())
+            self.up_blocks.append(block)
+
+        # Upsampling
+        self.up_blocks_S = nn.ModuleList()
+        for i_level in range(self.n_layers+1):
+            block = nn.ModuleList()
+            block.append(ResnetBlock(2 * ch, ch, time_embed_dim, dropout, 0, self.cond, film))
+            if self.inc_attn:
+                block.append(AttnBlock(ch, width, num_heads))
+            else:
+                block.append(nn.Identity())
+            self.up_blocks_S.append(block)
+
+        self.norm_out = NormalizationLayer(ch)
+        self.conv_out = nn.Conv2d(ch, out_channels, 3, padding=1)
+
+    @torch.compile()
+    def flat_unet(self, x, temb, yemb, semb):
+        # Downsampling
+        h = self.conv_in(x)
+        h_S = self.conv_in_S(semb)
+        hs = [h]
+        hs_S = [h_S]
+        for blocks_S, blocks in zip(self.down_blocks_S, self.down_blocks):
+            h_S = blocks_S[0](h_S, temb, yemb, None)
+            h_S = blocks_S[1](h_S)
+            hs_S.append(h_S)
+            h = blocks[0](h, temb, yemb, h_S)
+            h = blocks[1](h)
+            hs.append(h)
+
+        # Middle
+        h_S = self.mid_block1_S(h_S, temb, yemb, None)
+        h_S = self.mid_attn_S(h_S)
+        h = self.mid_block1(h, temb, yemb, h_S)
+        h = self.mid_attn(h)
+        h_S = self.mid_block2_S(h_S, temb, yemb, None)
+        h = self.mid_block2(h, temb, yemb, h_S)
+
+        # Upsampling
+        for i, (blocks_S, blocks) in enumerate(zip(self.up_blocks_S, self.up_blocks)):
+            h_S = blocks_S[0](torch.cat([h_S, hs_S[self.n_layers-(i+1)]], dim=1), temb, yemb, None)
+            h_S = blocks_S[1](h_S)
+            h = blocks[0](torch.cat([h, hs[self.n_layers-(i+1)]], dim=1), temb, yemb, h_S)
             h = blocks[1](h)
 
         h = F.silu(self.norm_out(h))

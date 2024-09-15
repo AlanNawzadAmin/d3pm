@@ -9,7 +9,7 @@ metric:
   name: val_l01
 parameters:
   architecture.nn_params.time_embed_dim:
-    value: 128
+    values: [0, 128]
   data.N:
     value: 128
   data.data:
