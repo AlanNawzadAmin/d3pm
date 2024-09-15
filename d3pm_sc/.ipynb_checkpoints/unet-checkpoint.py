@@ -4,6 +4,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+def freeze_layer(layer):
+    for param in layer.parameters():
+        param.requires_grad = False
+
 class NormalizationLayer(nn.Module):
     def __init__(self, num_channels):
         super().__init__()
@@ -28,7 +32,7 @@ def pad_image(x, target_size):
     return F.pad(x, padding, mode='constant', value=0)
 
 class ResnetBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, emb_dim, dropout, cond=False):
+    def __init__(self, in_channels, out_channels, emb_dim, dropout, semb_dim=0, cond=False, film=False):
         super().__init__()
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3, padding=1)
         self.conv2 = nn.Conv2d(out_channels, out_channels, 3, padding=1)
@@ -36,28 +40,56 @@ class ResnetBlock(nn.Module):
         self.norm2 = NormalizationLayer(out_channels)
         self.dropout = nn.Dropout(dropout)
         self.emb_dim = emb_dim
+        self.semb_dim = semb_dim
+        self.film = film
         if emb_dim>0:
             self.temb_proj = nn.Linear(emb_dim, out_channels)
+            if film:
+                self.temb_proj_mult = nn.Linear(emb_dim, out_channels)
+        if semb_dim>0:
+            self.semb_proj = nn.Linear(semb_dim, out_channels)
+            if film:
+                self.semb_proj_mult = nn.Linear(semb_dim, out_channels)
         if cond:
             self.y_proj = nn.Linear(emb_dim, out_channels)
+            if film:
+                self.y_proj_mult = nn.Linear(emb_dim, out_channels)
         
         if in_channels != out_channels:
             self.shortcut = nn.Conv2d(in_channels, out_channels, 1)
         else:
             self.shortcut = nn.Identity()
 
-    def forward(self, x, temb, y):
+    def forward(self, x, temb, y, semb=None):
         h = self.norm1(x)
         h = F.silu(h)
         h = self.conv1(h)
         
         # Add in timestep embedding
-        if self.emb_dim >0:
-            h = h + self.temb_proj(F.silu(temb))[:, :, None, None]
+        if self.emb_dim > 0:
+            if self.film:
+                gam = self.temb_proj_mult(F.silu(temb))[:, :, None, None]
+            else:
+                gam = 1
+            bet = self.temb_proj(F.silu(temb))[:, :, None, None]
+            h = gam * h + bet
+
+        if self.semb_dim > 0:
+            if self.film:
+                gam = self.semb_proj_mult(F.silu(semb.transpose(-1, -3))).transpose(-1, -3)
+            else:
+                gam = 1
+            bet = self.semb_proj(F.silu(semb.transpose(-1, -3))).transpose(-1, -3)
+            h = h + bet
         
         # Add in class embedding
         if y is not None:
-            h = h + self.y_proj(y)[:, :, None, None]
+            if self.film:
+                gam = self.y_proj_mult(y)[:, :, None, None]
+            else:
+                gam = 1
+            bet = self.y_proj(y)[:, :, None, None]
+            h = gam * h + bet
         
         h = F.silu(self.norm2(h))
         h = self.dropout(h)
@@ -107,6 +139,7 @@ class UNet(nn.Module):
                  num_heads=1,
                  width=32,
                  logistic_pars=True,
+                 semb_style="learn_embed", # "learn_nn"
                  **kwargs
                 ):
         super().__init__()
@@ -119,8 +152,19 @@ class UNet(nn.Module):
             semb = 10000**(-torch.arange(emb_dim)/(emb_dim-1))
             semb = torch.cat([torch.sin(s * semb), torch.cos(s * semb)], dim=1)
         
-            self.S_embed = nn.Embedding(1000, s_dim)
-            self.S_embed.weight.data = semb
+            self.S_embed_sinusoid = nn.Embedding(1000, s_dim)
+            self.S_embed_sinusoid.weight.data = semb
+            if semb_style!="learn_embed":
+                s_embed_dim = time_embed_dim
+                in_channels = n_channel + s_embed_dim
+                freeze_layer(self.S_embed_sinusoid)
+                self.S_embed_nn = nn.Sequential(
+                    nn.Linear(n_channel * s_dim, s_embed_dim),
+                    nn.SiLU(),
+                    nn.Linear(s_embed_dim, s_embed_dim),
+                )
+            else:
+                self.S_embed_nn = nn.Identity()
         else:
             in_channels= n_channel
         self.N = N
@@ -237,12 +281,15 @@ class UNet(nn.Module):
         x = pad_image(x, self.width)
         x = x.float()
         x[..., :self.n_channel, :, :] = (2 * x[..., :self.n_channel, :, :] / self.N) - 1.0
-    
-        if S is not None:
-            s_embed = self.S_embed(S.permute(0,2,3,1))
-            s_embed = s_embed.reshape(*s_embed.shape[:-2], -1).permute(0,3,1,2)
 
-            x = torch.cat([x, s_embed], dim=1)
+        # S embedding
+        if S is not None:
+            semb = self.S_embed_sinusoid(S.permute(0,2,3,1))
+            semb = self.S_embed_nn(semb.reshape(*semb.shape[:-2], -1)).permute(0,3,1,2)
+
+            x = torch.cat([x, semb], dim=1)
+        else:
+            semb = None
 
         # Time embedding   
         if self.time_embed_dim > 0:
@@ -287,6 +334,7 @@ class KingmaUNet(nn.Module):
                  n_transformers=1,
                  width=32,
                  logistic_pars=True,
+                 semb_style="learn_embed", # "learn_nn", "u_inject"
                  **kwargs
                 ):
         super().__init__()
@@ -299,9 +347,24 @@ class KingmaUNet(nn.Module):
             semb = 10000**(-torch.arange(emb_dim)/(emb_dim-1))
             semb = torch.cat([torch.sin(s * semb), torch.cos(s * semb)], dim=1)
         
-            self.S_embed = nn.Embedding(1000, s_dim)
-            self.S_embed.weight.data = semb
+            self.S_embed_sinusoid = nn.Embedding(1000, s_dim)
+            self.S_embed_sinusoid.weight.data = semb
+            if semb_style != "learn_embed":
+                s_embed_dim = time_embed_dim
+                in_channels = ch * n_channel + s_embed_dim
+                freeze_layer(self.S_embed_sinusoid)
+                self.S_embed_nn = nn.Sequential(
+                    nn.Linear(n_channel * s_dim, s_embed_dim),
+                    nn.SiLU(),
+                    nn.Linear(s_embed_dim, s_embed_dim),
+                )
+            else:
+                s_embed_dim = 0
+                self.S_embed_nn = nn.Identity()
+            if semb_style != "u_inject":
+                s_embed_dim = 0
         else:
+            s_embed_dim = 0
             in_channels = ch * n_channel
         self.N = N
         self.n_channel = n_channel
@@ -336,7 +399,7 @@ class KingmaUNet(nn.Module):
         self.down_blocks = nn.ModuleList()
         for i_level in range(self.n_layers):
             block = nn.ModuleList()
-            block.append(ResnetBlock(ch, ch, time_embed_dim, dropout, self.cond))
+            block.append(ResnetBlock(ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond))
             if self.inc_attn:
                 block.append(AttnBlock(ch, width, num_heads))
             else:
@@ -344,16 +407,16 @@ class KingmaUNet(nn.Module):
             self.down_blocks.append(block)
 
         # Middle
-        self.mid_block1 = ResnetBlock(ch, ch, time_embed_dim, dropout, self.cond)
+        self.mid_block1 = ResnetBlock(ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond)
         self.mid_attn = nn.Sequential(*[AttnBlock(ch, width, num_heads)
                                         for i in range(n_transformers)])
-        self.mid_block2 = ResnetBlock(ch, ch, time_embed_dim, dropout, self.cond)
+        self.mid_block2 = ResnetBlock(ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond)
 
         # Upsampling
         self.up_blocks = nn.ModuleList()
         for i_level in range(self.n_layers+1):
             block = nn.ModuleList()
-            block.append(ResnetBlock(2 * ch, ch, time_embed_dim, dropout, self.cond))
+            block.append(ResnetBlock(2 * ch, ch, time_embed_dim, dropout, s_embed_dim, self.cond))
             if self.inc_attn:
                 block.append(AttnBlock(ch, width, num_heads))
             else:
@@ -363,24 +426,24 @@ class KingmaUNet(nn.Module):
         self.norm_out = NormalizationLayer(ch)
         self.conv_out = nn.Conv2d(ch, out_channels, 3, padding=1)
 
-    @torch.compile(fullgraph=True, dynamic=False)
-    def flat_unet(self, x, temb, yemb):
+    @torch.compile()
+    def flat_unet(self, x, temb, yemb, semb):
         # Downsampling
         h = self.conv_in(x)
         hs = [h]
         for blocks in self.down_blocks:
-            h = blocks[0](h, temb, yemb)
+            h = blocks[0](h, temb, yemb, semb)
             h = blocks[1](h)
             hs.append(h)
 
         # Middle
-        h = self.mid_block1(h, temb, yemb)
+        h = self.mid_block1(h, temb, yemb, semb)
         h = self.mid_attn(h)
-        h = self.mid_block2(h, temb, yemb)
+        h = self.mid_block2(h, temb, yemb, semb)
 
         # Upsampling
         for i, blocks in enumerate(self.up_blocks):
-            h = blocks[0](torch.cat([h, hs[self.n_layers-(i+1)]], dim=1), temb, yemb)
+            h = blocks[0](torch.cat([h, hs[self.n_layers-(i+1)]], dim=1), temb, yemb, semb)
             h = blocks[1](h)
 
         h = F.silu(self.norm_out(h))
@@ -391,12 +454,15 @@ class KingmaUNet(nn.Module):
         x_onehot = F.one_hot(x.long(), num_classes=self.N).float()
         x = self.x_embed(x.permute(0,2,3,1))
         x = x.reshape(*x.shape[:-2], -1).permute(0,3,1,2)
-    
-        if S is not None:
-            s_embed = self.S_embed(S.permute(0,2,3,1))
-            s_embed = s_embed.reshape(*s_embed.shape[:-2], -1).permute(0,3,1,2)
 
-            x = torch.cat([x, s_embed], dim=1)
+        # S embedding
+        if S is not None:
+            semb = self.S_embed_sinusoid(S.permute(0,2,3,1))
+            semb = self.S_embed_nn(semb.reshape(*semb.shape[:-2], -1)).permute(0,3,1,2)
+
+            x = torch.cat([x, semb], dim=1)
+        else:
+            semb = None
 
         # Time embedding        
         if self.time_embed_dim > 0:
@@ -416,7 +482,7 @@ class KingmaUNet(nn.Module):
         
         # Reshape output and add to x_onehot
         B, C, H, W, _ = x_onehot.shape
-        h = self.flat_unet(x, temb, yemb)
+        h = self.flat_unet(x, temb, yemb, semb)
         h = h[:, :, :H, :W].reshape(B, C, self.N, H, W).permute((0, 1, 3, 4, 2))
         return h + self.logistic_pars * x_onehot
 

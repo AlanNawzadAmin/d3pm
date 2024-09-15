@@ -1,0 +1,22 @@
+program: train.py
+method: grid
+command:
+  - ${env}
+  - python3
+  - ${program}
+  - ${args_no_hyphens}
+metric:
+  name: val_l01
+  goal: minimize
+parameters:
+  model.seed:
+    values: [0, 1, 2]
+  data.data:
+    values: [CIFAR10]
+  data.N:
+    value: 128
+  model.forward_kwargs.type:
+      value: uniform
+  architecture.nn_params.semb_style:
+    values: [learn_embed, learn_nn, u_inject]
+    

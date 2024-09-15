@@ -26,6 +26,7 @@ architecture:
         n_layers: 8
         time_embed_dim: 0
         logistic_pars: true
+        semb_style: learn_embed
     x0_model_class: KingmaUNet
     width: 32
 
