@@ -30,8 +30,8 @@ def get_a_b_func_cont(L, p0):
     def log_alpha(ts):
         closest_index = torch.searchsorted(base_ts, ts.to('cpu'))
         best_guess_l = base_alphas[closest_index-1]
-        best_guess_u = base_alphas[closest_index]
-        out = newton_root_finder(mi, best_guess_l, ts)
+        # best_guess_u = base_alphas[closest_index]
+        out = newton_root_finder(mi, best_guess_l, ts.to('cpu'))
         # out = root_finder(mi, best_guess_l, best_guess_u, ts)
         return -torch.where(out>1e-6, out, 1e-6).to(ts.device)
     
@@ -78,7 +78,7 @@ def get_a_b_func_sc(K, p0):
     def log_alpha(ts):
         closest_index = torch.searchsorted(base_ts, ts.to('cpu'))
         best_guess_l = base_alphas[closest_index-1]
-        best_guess_u = base_alphas[closest_index]
+        # best_guess_u = base_alphas[closest_index]
         out = newton_root_finder(mi, best_guess_l, ts.to('cpu'))
         # out = root_finder(mi, best_guess_l, best_guess_u, ts)
         return -torch.where(out>1e-6, out, 1e-6).to(ts.device)
