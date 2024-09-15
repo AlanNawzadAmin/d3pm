@@ -52,10 +52,11 @@ def get_a_b_func_sc(K, p0):
     V_inv = torch.linalg.inv(V)
     def mi_p(n):
         if n > 0:
-            mat = torch.real((V[None,:, :] * ((1+evals) ** n)) @ V_inv)
+            mat = torch.real((V * ((1+evals[None, :]) ** n)) @ V_inv)
         else:
             mat = torch.eye(len(K), dtype=K.dtype)
         p = p0[:, None] * mat
+        p = torch.where(p < 0, 0, p)
         return (torch.xlogy(p, p).sum(-1) - torch.xlogy(p.sum(-2), p.sum(-2))).sum(-1) / ent_p0 + 1
     precompute_mis = torch.tensor([mi_p(n) for n in range(max_n)])
     precompute_mis = torch.maximum(precompute_mis, torch.zeros(1))
@@ -71,7 +72,7 @@ def get_a_b_func_sc(K, p0):
     base_ts = torch.linspace(0., 0.9991, 10000) 
     def log_alpha_naive(ts):
         out = newton_root_finder(mi, max_n/20, ts)
-        # out = root_finder(mi, 0, 20/second_eval, ts)
+        # out = root_finder(mi, 0, max_n/20, ts)
         return -torch.where(out>1e-6, out, 1e-6)
     base_alphas = -log_alpha_naive(base_ts)
     base_alphas = torch.cummax(base_alphas, 0)[0] # fix any errors
