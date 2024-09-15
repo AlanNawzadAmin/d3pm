@@ -28,6 +28,7 @@ architecture:
         logistic_pars: true
         semb_style: learn_embed
         s_embed_dim: 512
+        film: false
     x0_model_class: KingmaUNet
     width: 32
 
