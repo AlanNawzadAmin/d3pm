@@ -8,8 +8,12 @@ metric:
   goal: minimize
   name: val_l01
 parameters:
+  architecture.nn_params.film:
+    value: true
+  architecture.nn_params.semb_style:
+    value: u_inject
   architecture.nn_params.time_embed_dim:
-    value: 128
+    value: 512
   data.N:
     value: 8
   data.data:
