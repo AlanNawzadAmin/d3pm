@@ -25,7 +25,7 @@ architecture:
         time_lengthscale: 1
         n_layers: 8
         time_embed_dim: 0
-        logistic_pars: true
+        not_logistic_pars: false
         semb_style: learn_embed
         s_embed_dim: 512
         film: false
