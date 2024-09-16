@@ -52,11 +52,14 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
     def get_stationary(self):
         raise NotImplementedError
 
-    def model_predict(self, x_0, t, cond, S=None):
+    def base_predict(self, x_t, t, cond, S=None):
+        return self.x0_model(x_t, t, cond, S)
+
+    def model_predict(self, x_t, t, cond, S=None):
+        pred = self.base_predict(x_t, t, cond, S)
         if not self.logistic_pars:
-            return self.x0_model(x_0, t, cond, S)
+            return pred
         else:
-            pred = self.x0_model(x_0, t, cond, S)
             loc = pred[..., 0].unsqueeze(-1)
             log_scale = pred[..., 1].unsqueeze(-1)
             inv_scale = torch.exp(- (log_scale - 2.))

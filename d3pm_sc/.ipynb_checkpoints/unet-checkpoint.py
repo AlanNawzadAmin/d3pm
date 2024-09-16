@@ -312,7 +312,7 @@ class UNet(nn.Module):
         B, C, H, W, _ = x_onehot.shape
         h = self.unet_main(x, temb, yemb)
         h = h[:, :, :H, :W].reshape(B, C, self.N, H, W).permute((0, 1, 3, 4, 2))
-        return h + self.logistic_pars * x_onehot
+        return h + (1-self.logistic_pars) * x_onehot
 
 ########################
 
@@ -337,6 +337,7 @@ class KingmaUNet(nn.Module):
                  width=32,
                  logistic_pars=True,
                  semb_style="learn_embed", # "learn_nn", "u_inject"
+                 s_first_mult=False,
                  film=False,
                  **kwargs
                 ):
@@ -352,6 +353,7 @@ class KingmaUNet(nn.Module):
         
             self.S_embed_sinusoid = nn.Embedding(1000, s_dim)
             self.S_embed_sinusoid.weight.data = semb
+            self.s_first_mult = s_first_mult
             if semb_style != "learn_embed":
                 in_channels = ch * n_channel + s_embed_dim
                 freeze_layer(self.S_embed_sinusoid)
@@ -360,6 +362,12 @@ class KingmaUNet(nn.Module):
                     nn.SiLU(),
                     nn.Linear(s_embed_dim, s_embed_dim),
                 )
+                if self.s_first_mult:
+                    self.S_mult_nn = nn.Sequential(
+                        nn.Linear(n_channel * s_dim, s_embed_dim),
+                        nn.SiLU(),
+                        nn.Linear(s_embed_dim, ch * n_channel),
+                    )
             else:
                 s_embed_dim = 0
                 self.S_embed_nn = nn.Identity()
@@ -459,9 +467,12 @@ class KingmaUNet(nn.Module):
 
         # S embedding
         if S is not None:
-            semb = self.S_embed_sinusoid(S.permute(0,2,3,1))
-            semb = self.S_embed_nn(semb.reshape(*semb.shape[:-2], -1)).permute(0,3,1,2)
+            semb_sin = self.S_embed_sinusoid(S.permute(0,2,3,1))
+            semb = self.S_embed_nn(semb_sin.reshape(*semb_sin.shape[:-2], -1)).permute(0,3,1,2)
 
+            if self.s_first_mult:
+                s_mult = self.S_mult_nn(semb_sin.reshape(*semb_sin.shape[:-2], -1)).permute(0,3,1,2)
+                x = x * s_mult
             x = torch.cat([x, semb], dim=1)
         else:
             semb = None
@@ -486,7 +497,7 @@ class KingmaUNet(nn.Module):
         B, C, H, W, _ = x_onehot.shape
         h = self.flat_unet(x, temb, yemb, semb)
         h = h[:, :, :H, :W].reshape(B, C, self.N, H, W).permute((0, 1, 3, 4, 2))
-        return h + self.logistic_pars * x_onehot
+        return h + (1-self.logistic_pars) * x_onehot
 
 
 ########################

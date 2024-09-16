@@ -13,7 +13,7 @@ model:
         normalized: true
         bandwidth: 0.14
     hybrid_loss_coeff: 0.0
-    logistic_pars: true
+    logistic_pars: false
     fix_x_t_bias: false
     n_T: 500
     t_max: 0.999
