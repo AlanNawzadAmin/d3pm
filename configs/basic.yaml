@@ -17,6 +17,7 @@ model:
     fix_x_t_bias: false
     n_T: 500
     t_max: 0.999
+    input_logits: false
 
 architecture:
     s_dim: 128
@@ -26,9 +27,11 @@ architecture:
         n_layers: 8
         time_embed_dim: 0
         not_logistic_pars: false
-        semb_style: learn_embed
+        semb_style: u_inject
         s_embed_dim: 512
-        film: false
+        film: true
+        input_logits: false
+        first_mult: false
     x0_model_class: KingmaUNet
     width: 32
 

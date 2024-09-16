@@ -19,12 +19,14 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         hybrid_loss_coeff=0.01,
         fix_x_t_bias=False,
         logistic_pars=False,
+        input_logits=False,
         **kwargs
     ):
         # Precalculate betas, define model_predict, p_sample
         super().__init__(x0_model_class, nn_params, num_classes, schedule_type, hybrid_loss_coeff, logistic_pars, **kwargs)
         self.save_hyperparameters(ignore=['x0_model_class'])
         self.fix_x_t_bias = fix_x_t_bias
+        self.input_logits = input_logits
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
         # Precalculate Ks
@@ -50,6 +52,13 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         stationary = stationary * torch.sign(stationary)
         assert torch.all(stationary > 0)
         return stationary / stationary.sum()
+
+    def base_predict(self, x_t, t, cond, S=None):
+        if not self.input_logits:
+            return self.x0_model(x_t, t, cond, S)
+        else:
+            x_0_logits = torch.log(self.K_powers[S, :, x_t] + self.eps)
+            return self.x0_model(x_0_logits, t, cond, S)
 
     def get_kl_t1(self, x):
         # sample S

@@ -337,12 +337,14 @@ class KingmaUNet(nn.Module):
                  width=32,
                  not_logistic_pars=True,
                  semb_style="learn_embed", # "learn_nn", "u_inject"
-                 s_first_mult=False,
+                 first_mult=False,
+                 input_logits=False,
                  film=False,
                  **kwargs
                 ):
         super().__init__()
 
+        self.first_mult = first_mult
         if schedule_conditioning:
             in_channels = ch * n_channel + n_channel * s_dim
 
@@ -353,7 +355,6 @@ class KingmaUNet(nn.Module):
         
             self.S_embed_sinusoid = nn.Embedding(1000, s_dim)
             self.S_embed_sinusoid.weight.data = semb
-            self.s_first_mult = s_first_mult
             if semb_style != "learn_embed":
                 in_channels = ch * n_channel + s_embed_dim
                 freeze_layer(self.S_embed_sinusoid)
@@ -362,7 +363,7 @@ class KingmaUNet(nn.Module):
                     nn.SiLU(),
                     nn.Linear(s_embed_dim, s_embed_dim),
                 )
-                if self.s_first_mult:
+                if self.first_mult:
                     self.S_mult_nn = nn.Sequential(
                         nn.Linear(n_channel * s_dim, s_embed_dim),
                         nn.SiLU(),
@@ -387,7 +388,15 @@ class KingmaUNet(nn.Module):
         self.width = width
         self.not_logistic_pars = not_logistic_pars
 
-        self.x_embed = nn.Embedding(N, ch)
+        self.input_logits = input_logits
+        if not self.input_logits:
+            self.x_embed = nn.Embedding(N, ch)
+        else:
+            self.x_embed = nn.Sequential(
+                nn.Linear(n_channel * N, ch * n_channel),
+                nn.SiLU(),
+                nn.Linear(ch * n_channel, ch * n_channel),
+            )
         # Time embedding
         self.time_embed_dim = time_embed_dim
         if self.time_embed_dim > 0:
@@ -396,6 +405,12 @@ class KingmaUNet(nn.Module):
                 nn.SiLU(),
                 nn.Linear(time_embed_dim, time_embed_dim),
             )
+            if self.first_mult:
+                self.time_embed_mult_nn = nn.Sequential(
+                    nn.Linear(ch, time_embed_dim),
+                    nn.SiLU(),
+                    nn.Linear(time_embed_dim, ch * n_channel),
+                )
 
         # Class embedding
         self.cond = num_classes > 1 
@@ -461,40 +476,48 @@ class KingmaUNet(nn.Module):
         return h
     
     def forward(self, x, t, y=None, S=None):
-        x_onehot = F.one_hot(x.long(), num_classes=self.N).float()
-        x = self.x_embed(x.permute(0,2,3,1))
-        x = x.reshape(*x.shape[:-2], -1).permute(0,3,1,2)
+        B, C, H, W, *_ = x.shape
+        if not self.input_logits:
+            x_onehot = F.one_hot(x.long(), num_classes=self.N).float()
+            x = self.x_embed(x.permute(0,2,3,1))
+            x = x.reshape(*x.shape[:-2], -1).permute(0,3,1,2)
+        else:
+            x_onehot = 0
+            x = (x - x.mean(-1)[..., None]).permute(0,2,3,1,4)
+            x = self.x_embed(x.reshape(*x.shape[:-2], -1)).permute(0,3,1,2)
+
+        # Time embedding        
+        if self.time_embed_dim > 0:
+            t = t.float().reshape(-1, 1) * 1000 / self.time_lengthscale
+            emb_dim = self.ch//2
+            temb_sin = 10000**(-torch.arange(emb_dim, device=t.device)/(emb_dim-1))
+            temb_sin = torch.cat([torch.sin(t * temb_sin), torch.cos(t * temb_sin)], dim=1)
+            temb = self.time_embed(temb_sin)
+            if self.first_mult:
+                t_mult = self.time_embed_mult_nn(temb_sin)
+                x = x * t_mult[:, :, None, None]
+        else:
+            temb = None
 
         # S embedding
         if S is not None:
             semb_sin = self.S_embed_sinusoid(S.permute(0,2,3,1))
             semb = self.S_embed_nn(semb_sin.reshape(*semb_sin.shape[:-2], -1)).permute(0,3,1,2)
 
-            if self.s_first_mult:
+            if self.first_mult:
                 s_mult = self.S_mult_nn(semb_sin.reshape(*semb_sin.shape[:-2], -1)).permute(0,3,1,2)
                 x = x * s_mult
             x = torch.cat([x, semb], dim=1)
         else:
             semb = None
 
-        # Time embedding        
-        if self.time_embed_dim > 0:
-            t = t.float().reshape(-1, 1) * 1000 / self.time_lengthscale
-            emb_dim = self.ch//2
-            temb = 10000**(-torch.arange(emb_dim, device=t.device)/(emb_dim-1))
-            temb = torch.cat([torch.sin(t * temb), torch.cos(t * temb)], dim=1)
-            temb = self.time_embed(temb)
-        else:
-            temb = None
-        
         # Class embedding
         if y is not None and self.num_classes > 1:
             yemb = self.class_embed(y)
         else:
             yemb = None
         
-        # Reshape output and add to x_onehot
-        B, C, H, W, _ = x_onehot.shape
+        # Reshape output
         h = self.flat_unet(x, temb, yemb, semb)
         h = h[:, :, :H, :W].reshape(B, C, self.N, H, W).permute((0, 1, 3, 4, 2))
         return h + self.not_logistic_pars * x_onehot
