@@ -32,6 +32,10 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         L = get_inf_gens(forward_kwargs, num_classes)
         self.register_buffer("L", L)
 
+    def pre_configure_model(self, dataloader):
+        self.calc_p0(dataloader)
+        self.log_alpha, self.beta, *_ = self.get_beta_func(self.L, self.p0, 'SEDD')
+        
     def get_stationary(self):
         evals, evecs = torch.linalg.eig(self.L.T)
         norms_sq = torch.real(evals)
@@ -122,7 +126,7 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         for t in pbar:
             t = torch.tensor([t] * x.shape[0], device=x.device)
             x_next = self.p_sample(
-                x, t, cond, torch.rand((*x.shape, self.num_classes), device=x.device), 1/trans_step
+                x, t, cond, torch.rand((*x.shape, self.num_classes), device=x.device), 1/n_T
             )
             x = x_next
 

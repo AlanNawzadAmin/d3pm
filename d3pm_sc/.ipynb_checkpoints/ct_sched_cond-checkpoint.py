@@ -19,26 +19,29 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         hybrid_loss_coeff=0.01,
         fix_x_t_bias=False,
         logistic_pars=False,
+        input_logits=False,
         **kwargs
     ):
         # Precalculate betas, define model_predict, p_sample
         super().__init__(x0_model_class, nn_params, num_classes, schedule_type, hybrid_loss_coeff, logistic_pars, **kwargs)
         self.save_hyperparameters(ignore=['x0_model_class'])
         self.fix_x_t_bias = fix_x_t_bias
+        self.input_logits = input_logits
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
         # Precalculate Ks
         L = get_inf_gens(forward_kwargs, num_classes)
         rate = - (L.diagonal().min()) / (1-gamma) # L^* in sec 6.6 of the notes
         K = L / rate + torch.eye(num_classes)
-        self.beta_scale = self.beta
-        self.beta = lambda t: rate * self.beta_scale(t)
-        self.log_alpha_scale = self.log_alpha
-        self.log_alpha  = lambda t: self.log_alpha_scale(t) * rate
         K_powers = torch.stack([torch.linalg.matrix_power(K, i) for i in range(500)])
+        self.rate = rate
         self.register_buffer("K", K)
         self.register_buffer("K_powers", K_powers)
 
+    def pre_configure_model(self, dataloader):
+        self.calc_p0(dataloader)
+        self.log_alpha, self.beta, *_ = self.get_beta_func(self.K, self.p0, type_='schedule_condition', scale=self.rate)
+    
     def get_stationary(self):
         evals, evecs = torch.linalg.eig(self.K.T)
         norms_sq = torch.real(evals * evals.conj())
@@ -49,6 +52,13 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         stationary = stationary * torch.sign(stationary)
         assert torch.all(stationary > 0)
         return stationary / stationary.sum()
+
+    def base_predict(self, x_t, t, cond, S=None):
+        if not self.input_logits:
+            return self.x0_model(x_t, t, cond, S)
+        else:
+            x_0_logits = torch.log(self.K_powers[S, :, x_t] + self.eps)
+            return self.x0_model(x_0_logits, t, cond, S)
 
     def get_kl_t1(self, x):
         # sample S

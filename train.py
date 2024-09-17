@@ -58,7 +58,9 @@ def train(cfg: DictConfig) -> None:
         seed=cfg.model.seed,
         **OmegaConf.to_container(cfg.train, resolve=True),
     )
-    
+
+    model.pre_configure_model(train_dataloader)
+
     ##### Train
     wandb.init()
     wandb_logger = WandbLogger(project="debugging")

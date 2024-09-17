@@ -11,6 +11,8 @@ metric:
 parameters:
   model.seed:
     values: [0, 1, 2]
+  model.fix_x_t_bias:
+    value: false
   data.data:
     values: [CIFAR10]
   data.N:

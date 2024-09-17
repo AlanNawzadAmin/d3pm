@@ -38,12 +38,7 @@ def sample_n_transitions_cont(log_alpha, batch_size, times):
     """ Continuous version of above. alpha is a function that takes t.
     """
     t_shape = times.shape
-    times = times.reshape(1, -1)
+    times = times.reshape(-1)
     log_alpha_t = log_alpha(times).reshape(1, -1).repeat(batch_size, 1)
     transitions = torch.poisson(-log_alpha_t)
     return transitions
-
-def sample_full_transitions_cont(beta, batch_size, n_T=1000):
-    """ Continuous version of above. beta is a function that takes t.
-    """
-    raise NotImplementedError

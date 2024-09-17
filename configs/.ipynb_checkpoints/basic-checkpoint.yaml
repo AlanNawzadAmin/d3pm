@@ -7,7 +7,7 @@ model:
     seed: 0
     model: ScheduleCondition
     gamma: 0
-    schedule_type: linear
+    schedule_type: mutual_information
     forward_kwargs:
         type: gaussian
         normalized: true
@@ -16,15 +16,22 @@ model:
     logistic_pars: false
     fix_x_t_bias: false
     n_T: 500
-    t_max: 0.999999
+    t_max: 0.999
+    input_logits: false
 
 architecture:
-    s_dim: 4
+    s_dim: 128
     nn_params:
         s_lengthscale: 50
         time_lengthscale: 1
         n_layers: 8
         time_embed_dim: 0
+        not_logistic_pars: false
+        semb_style: u_inject
+        s_embed_dim: 512
+        film: true
+        input_logits: false
+        first_mult: false
     x0_model_class: KingmaUNet
     width: 32
 

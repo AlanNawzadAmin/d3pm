@@ -20,12 +20,14 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         hybrid_loss_coeff=0.01,
         fix_x_t_bias=False,
         logistic_pars=False,
+        input_logits=False,
         **kwargs
     ):
         # Precalculate betas, define model_predict, p_sample
         super().__init__(x0_model_class, nn_params, num_classes, schedule_type, hybrid_loss_coeff, logistic_pars, **kwargs)
         self.save_hyperparameters(ignore=['x0_model_class'])
         self.fix_x_t_bias = fix_x_t_bias
+        self.input_logits = input_logits
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
         # Precalculate Ks
@@ -36,13 +38,14 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         self.log_alpha  = lambda t: self.log_alpha_scale(t) * rate    
     
         # Precalculate K_powers
-        num_powers = 2
-        if (forward_kwargs['type'] == "gaussian") or (forward_kwargs['type'] == "bert_embed"):
-            dense = forward_kwargs['type'] == "gaussian"
+        num_powers = 50
+        if num_classes < 100 or (forward_kwargs['type'] == "bert_embed"):
+            dense = forward_kwargs['type'] != "bert_embed"
             
             if dense:
                 current_prod = np.eye(num_classes)
             else:
+                num_powers = 20
                 current_prod = scipy.sparse.eye(K.shape[0])
                 
             K_powers = [current_prod]
@@ -60,12 +63,13 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
                     shape = scipy_coo.shape
                     torch_sparse_tensor = torch.sparse_coo_tensor(indices, data, size=shape)
                     K_powers[i] = torch_sparse_tensor
+                    
+                self.K_powers = K_powers
             else:
                 K_powers = torch.stack(K_powers)
 
-            self.register_buffer("K", K)
-            self.register_buffer("K_powers", K_powers)
-            
+                self.register_buffer("K", K)
+                self.register_buffer("K_powers", K_powers)
             
         elif forward_kwargs['type'] == "uniform":
             n = num_classes
@@ -80,9 +84,12 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
             deltas = (lambda_1_p - lambda_2_p) / n
             diag_vals = lambda_2_p + deltas
 
-            print(deltas)
-            print(diag_vals)
+            # save these to compute the matrix power vector-matrix multiplies on the fly
 
+    def pre_configure_model(self, dataloader):
+        self.calc_p0(dataloader)
+        self.log_alpha, self.beta, *_ = self.get_beta_func(self.K, self.p0, type_='schedule_condition', scale=self.rate)
+    
     def get_stationary(self):
         evals, evecs = torch.linalg.eig(self.K.T)
         norms_sq = torch.real(evals * evals.conj())
@@ -93,6 +100,13 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         stationary = stationary * torch.sign(stationary)
         assert torch.all(stationary > 0)
         return stationary / stationary.sum()
+
+    def base_predict(self, x_t, t, cond, S=None):
+        if not self.input_logits:
+            return self.x0_model(x_t, t, cond, S)
+        else:
+            x_0_logits = torch.log(self.K_powers[S, :, x_t] + self.eps)
+            return self.x0_model(x_0_logits, t, cond, S)
 
     def get_kl_t1(self, x):
         # sample S

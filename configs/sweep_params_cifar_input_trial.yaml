@@ -14,12 +14,13 @@ parameters:
   data.data:
     values: [CIFAR10]
   data.N:
-    value: 4
+    values: [4, 128]
   model.forward_kwargs.type:
       value: uniform
-  model.gamma:
-    values: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-  architecture.nn_params.semb_style:
-    value: u_inject
-  architecture.nn_params.film:
-    value: true
+  architecture.nn_params.input_logits:
+    values: [true, false]
+  model.input_logits:
+    value: architecture.nn_params.input_logits
+  architecture.nn_params.first_mult:
+    values: [true, false]
+    

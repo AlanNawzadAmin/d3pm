@@ -9,13 +9,15 @@ metric:
   name: val_l01
 parameters:
   architecture.nn_params.film:
-    value: true
+    values:
+    - true
+    - false
   architecture.nn_params.semb_style:
     value: u_inject
   architecture.nn_params.time_embed_dim:
-    value: 512
+    value: 128
   data.N:
-    value: 4
+    value: 128
   data.data:
     values:
     - CIFAR10
