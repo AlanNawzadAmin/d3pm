@@ -53,7 +53,7 @@ class DiscreteScheduleCondition(DiscreteTimeDiffusion): #schedule conditioning i
         S = sample_n_transitions(self.beta_t.to(x.device), x[0].flatten().shape[0], t)
         S = S.swapaxes(0, 1).reshape(*x.shape).long()
         # get p(x_1|x_0, S)
-        x_0_logits =convert_to_distribution(x, self.num_classes, self.eps)
+        x_0_logits = convert_to_distribution(x, self.num_classes, self.eps)
         trans_mats = self.K_powers[S, :, :]
         softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
         x_1 = torch.einsum("b...c,b...cd->b...d", softmaxed, trans_mats)

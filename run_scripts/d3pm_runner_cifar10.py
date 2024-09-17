@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 import wandb
 from d3pm_sc.d3pm import D3PM
-from d3pm_sc.dit import DiT_Llama
+from d3pm_sc.dit_vision import DiT_Llama
 
 if __name__ == "__main__":
 

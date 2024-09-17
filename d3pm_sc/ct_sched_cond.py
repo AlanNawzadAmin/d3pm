@@ -1,9 +1,10 @@
+import scipy
 import numpy as np
 import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-from .utils import kls, convert_to_distribution, get_inf_gens
+from .utils import kls, convert_to_distribution, get_L_and_K
 from .schedule_sample import sample_n_transitions_cont
 from .continuous_time_diffusion import ContinuousTimeDiffusion
 
@@ -28,16 +29,59 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
         # Precalculate Ks
-        L = get_inf_gens(forward_kwargs, num_classes)
-        rate = - (L.diagonal().min()) / (1-gamma) # L^* in sec 6.6 of the notes
-        K = L / rate + torch.eye(num_classes)
+        L, K, rate = get_L_and_K(forward_kwargs, num_classes, gamma)
         self.beta_scale = self.beta
         self.beta = lambda t: rate * self.beta_scale(t)
         self.log_alpha_scale = self.log_alpha
-        self.log_alpha  = lambda t: self.log_alpha_scale(t) * rate
-        K_powers = torch.stack([torch.linalg.matrix_power(K, i) for i in range(500)])
-        self.register_buffer("K", K)
-        self.register_buffer("K_powers", K_powers)
+        self.log_alpha  = lambda t: self.log_alpha_scale(t) * rate    
+    
+        # Precalculate K_powers
+        num_powers = 2
+        if (forward_kwargs['type'] == "gaussian") or (forward_kwargs['type'] == "bert_embed"):
+            dense = forward_kwargs['type'] == "gaussian"
+            
+            if dense:
+                current_prod = np.eye(num_classes)
+            else:
+                current_prod = scipy.sparse.eye(K.shape[0])
+                
+            K_powers = [current_prod]
+            for _ in range(num_powers):
+                current_prod = current_prod @ K
+                K_powers.append(current_prod)
+            
+            if not dense:
+                for i in range(num_powers):
+                    scipy_coo = K_powers[i].tocoo()
+                    row = torch.from_numpy(scipy_coo.row.astype(np.int64))
+                    col = torch.from_numpy(scipy_coo.col.astype(np.int64))
+                    data = torch.from_numpy(scipy_coo.data)
+                    indices = torch.stack([row, col], dim=0)
+                    shape = scipy_coo.shape
+                    torch_sparse_tensor = torch.sparse_coo_tensor(indices, data, size=shape)
+                    K_powers[i] = torch_sparse_tensor
+            else:
+                K_powers = torch.stack(K_powers)
+
+            self.register_buffer("K", K)
+            self.register_buffer("K_powers", K_powers)
+            
+            
+        elif forward_kwargs['type'] == "uniform":
+            n = num_classes
+
+            # Compute eigenvalues
+            lambda_1 = (n - gamma) / (n - 1)
+            lambda_2 = gamma
+
+            lambda_1_p = lambda_1 ** torch.arange(num_powers)
+            lambda_2_p = lambda_2 ** torch.arange(num_powers)
+
+            deltas = (lambda_1_p - lambda_2_p) / n
+            diag_vals = lambda_2_p + deltas
+
+            print(deltas)
+            print(diag_vals)
 
     def get_stationary(self):
         evals, evecs = torch.linalg.eig(self.K.T)

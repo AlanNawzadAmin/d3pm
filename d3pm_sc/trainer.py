@@ -76,10 +76,16 @@ class DiffusionTrainer(pl.LightningModule):
         # self.log('param_norm', param_norm, sync_dist=True)
         return loss
 
-    def validation_step(self, batch, batch_idx):
-        x, cond = batch
+    def validation_step(self, batch, batch_idx):        
+        if isinstance(batch, tuple): #image datasets
+            x, cond = batch
+            attn_mask = None
+        elif isinstance(batch, dict): #text datasets
+            x, attn_mask = batch['input_ids'], batch['attention_mask']
+            cond = batch['cond'] if 'cond' in batch else None
+
         # x, cond = x.to(device), cond.to(device)
-        loss, info = self(x, cond)
+        loss, info = self(x, cond, attn_mask)
         self.log('val_l01', info['vb_loss'], on_step=False, on_epoch=True, sync_dist=True)
         self.log('val_l1', self.get_kl_t1(x).detach().item(), on_step=False, on_epoch=True, sync_dist=True)
         self.log('val_ce_loss', info['ce_loss'], on_step=False, on_epoch=True, sync_dist=True)

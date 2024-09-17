@@ -34,17 +34,22 @@ class MaskingDiffusion(ScheduleCondition): #schedule conditioning is True!
         # so we always assume S==1.
         # in principle we could also speed up sampling by ignoring S>1
 
-    def model_predict(self, x_t, t, cond, S):
+    def model_predict(self, x_t, t, cond, S, attn_mask=None):
         masked_pos = S > 0
         masked_x_t = torch.where(masked_pos, self.num_classes, x_t)
-        return self.x0_model(masked_x_t, t, cond, S=None)[..., :-1]
+        inputs = dict(x=masked_x_t, t=t, cond=cond, S=None)
+        if attn_mask is not None: inputs["attn_mask"] = attn_mask
+        return self.x0_model(**inputs)[..., :-1]
     
-    def forward(self, x: torch.Tensor, cond: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask: torch.Tensor = None) -> torch.Tensor:
         t, S, x_t = self.sample_point(x)
         S = (S>0).long()
         
+        print(S)
+        print(x_t)
+        
         # predict x_0 and prev(x_t)
-        predicted_x0_logits = self.model_predict(x_t, t, cond, S)
+        predicted_x0_logits = self.model_predict(x_t, t, cond, S, attn_mask)
         true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S)
         pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x_t, t, S)
 

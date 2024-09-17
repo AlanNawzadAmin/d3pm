@@ -198,7 +198,7 @@ class UNet(nn.Module):
         self.norm_out = NormalizationLayer(prev_out)
         self.conv_out = nn.Conv2d(prev_out, out_channels, 3, padding=1)
 
-    @torch.compile(fullgraph=True, dynamic=False)
+    # @torch.compile(fullgraph=True, dynamic=False)
     def unet_main(self, x, temb, yemb):
         # Downsampling
         h = self.conv_in(x)
@@ -359,7 +359,7 @@ class KingmaUNet(nn.Module):
         self.norm_out = NormalizationLayer(ch)
         self.conv_out = nn.Conv2d(ch, out_channels, 3, padding=1)
 
-    @torch.compile(fullgraph=True, dynamic=False)
+    # @torch.compile(fullgraph=True, dynamic=False)
     def flat_unet(self, x, temb, yemb):
         # Downsampling
         h = self.conv_in(x)

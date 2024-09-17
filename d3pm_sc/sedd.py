@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
 
-from .utils import kls, convert_to_distribution, get_inf_gens
+from .utils import kls, convert_to_distribution, get_L_and_K
 from .schedule_sample import sample_n_transitions_cont
 from .continuous_time_diffusion import ContinuousTimeDiffusion
 
@@ -29,7 +29,7 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
         # Precalculate Ks
-        L = get_inf_gens(forward_kwargs, num_classes)
+        L, _, _ = get_L_and_K(forward_kwargs, num_classes, gamma)
         self.register_buffer("L", L)
 
     def get_stationary(self):
