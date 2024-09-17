@@ -246,8 +246,15 @@ class DDiTBlock(nn.Module):
 
     bias_dropout_scale_fn = self._get_bias_dropout_scale()
 
+    #WIP, allow for passing the schedule in as conditioning at each layer
+    if len(c.shape) > 2:
+      bs, seq_len = c.shape[0], c.shape[1]
+      modulation = self.adaLN_modulation(
+        c.reshape(-1, c.shape[-1])).reshape(bs, seq_len, -1)
+    else:
+      modulation = self.adaLN_modulation(c)[:, None]
     (shift_msa, scale_msa, gate_msa, shift_mlp,
-     scale_mlp, gate_mlp) = self.adaLN_modulation(c)[:, None].chunk(6, dim=2)
+      scale_mlp, gate_mlp) = modulation.chunk(6, dim=2)
 
     # attention operation
     x_skip = x
@@ -315,7 +322,15 @@ class DDitFinalLayer(nn.Module):
 
 
   def forward(self, x, c):
-    shift, scale = self.adaLN_modulation(c)[:, None].chunk(2, dim=2)
+    if len(c.shape) > 2:
+      bs, seq_len = c.shape[0], c.shape[1]
+      modulation = self.adaLN_modulation(
+        c.reshape(-1, c.shape[-1])).reshape(bs, seq_len, -1)
+    else:
+      modulation = self.adaLN_modulation(c)[:, None]
+    
+    shift, scale = modulation.chunk(2, dim=2)
+    
     x = modulate_fused(self.norm_final(x), shift, scale)
     x = self.linear(x)
     return x
@@ -331,7 +346,7 @@ class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
     self.vocab_size = vocab_size
     
     if schedule_conditioning:
-        self.s_embed = TimestepEmbedder(config.cond_dim)
+        self.s_embed = TimestepEmbedder(config.hidden_size)
 
     self.vocab_embed = EmbeddingLayer(config.hidden_size, vocab_size)
     self.sigma_map = TimestepEmbedder(config.cond_dim)
@@ -363,11 +378,13 @@ class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
 
     rotary_cos_sin = self.rotary_emb(x)
 
-    # WIP, want to change to injecting at every layer by adding to c, but 
-    # we will need to get the shapes right
     if S is not None:
-      S = F.silu(self.s_embed(S))
+      bs, seq_len = S.shape[0], S.shape[1]
+      S = F.silu(self.s_embed(S.reshape(-1))).reshape(bs, seq_len, -1)
       x = x + S
+      
+      # WIP, this is approximately correct but not thoroughly tested
+      c = c[:, None] + S
     
     with torch.cuda.amp.autocast(dtype=torch.bfloat16):
       for i in range(len(self.blocks)):
