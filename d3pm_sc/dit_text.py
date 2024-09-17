@@ -346,7 +346,8 @@ class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
     self.vocab_size = vocab_size
     
     if schedule_conditioning:
-        self.s_embed = TimestepEmbedder(config.hidden_size)
+        self.s_embed_input = TimestepEmbedder(config.hidden_size)
+        self.s_embed_block = TimestepEmbedder(config.cond_dim)
 
     self.vocab_embed = EmbeddingLayer(config.hidden_size, vocab_size)
     self.sigma_map = TimestepEmbedder(config.cond_dim)
@@ -380,10 +381,11 @@ class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
 
     if S is not None:
       bs, seq_len = S.shape[0], S.shape[1]
-      S = F.silu(self.s_embed(S.reshape(-1))).reshape(bs, seq_len, -1)
+      S = F.silu(self.s_embed_input(S.reshape(-1))).reshape(bs, seq_len, -1)
       x = x + S
       
       # WIP, this is approximately correct but not thoroughly tested
+      S = F.silu(self.s_embed_block(S.reshape(-1))).reshape(bs, seq_len, -1)
       c = c[:, None] + S
     
     with torch.cuda.amp.autocast(dtype=torch.bfloat16):
