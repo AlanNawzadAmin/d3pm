@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-from .utils import kls, convert_to_distribution, get_inf_gens
+from .utils import kls, convert_to_distribution, get_L_and_K
 from .schedule_sample import sample_n_transitions_cont
 from .continuous_time_diffusion import ContinuousTimeDiffusion
 
@@ -30,13 +30,51 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
         # Precalculate Ks
-        L = get_inf_gens(forward_kwargs, num_classes)
-        rate = - (L.diagonal().min()) / (1-gamma) # L^* in sec 6.6 of the notes
-        K = L / rate + torch.eye(num_classes)
-        K_powers = torch.stack([torch.linalg.matrix_power(K, i) for i in range(5000)])
+        _, K, rate = get_L_and_K(forward_kwargs, num_classes, gamma)
         self.rate = rate
-        self.register_buffer("K", K)
-        self.register_buffer("K_powers", K_powers)
+        
+        # Precalculate K_powers
+        num_powers = 5000
+        if num_classes <= 512 or (forward_kwargs['type'] == "bert_embed"):
+            dense = forward_kwargs['type'] != "bert_embed"
+            if dense:
+                K_powers = torch.stack([torch.linalg.matrix_power(K, i) for i in range(5000)])
+            else:
+                num_powers = 20
+                current_prod = scipy.sparse.eye(K.shape[0])
+                K_powers = [current_prod]
+                for _ in range(num_powers):
+                    current_prod = current_prod @ K
+                    K_powers.append(current_prod)
+                for i in range(num_powers):
+                    scipy_coo = K_powers[i].tocoo()
+                    row = torch.from_numpy(scipy_coo.row.astype(np.int64))
+                    col = torch.from_numpy(scipy_coo.col.astype(np.int64))
+                    data = torch.from_numpy(scipy_coo.data)
+                    indices = torch.stack([row, col], dim=0)
+                    shape = scipy_coo.shape
+                    torch_sparse_tensor = torch.sparse_coo_tensor(indices, data, size=shape)
+                    K_powers[i] = torch_sparse_tensor
+                    
+                self.K_powers = K_powers
+
+            self.register_buffer("K", K)
+            self.register_buffer("K_powers", K_powers)
+            
+        elif forward_kwargs['type'] == "uniform":
+            n = num_classes
+
+            # Compute eigenvalues
+            lambda_1 = (n - gamma) / (n - 1)
+            lambda_2 = gamma
+
+            lambda_1_p = lambda_1 ** torch.arange(num_powers)
+            lambda_2_p = lambda_2 ** torch.arange(num_powers)
+
+            deltas = (lambda_1_p - lambda_2_p) / n
+            diag_vals = lambda_2_p + deltas
+
+            # save these to compute the matrix power vector-matrix multiplies on the fly
 
     def pre_configure_model(self, dataloader):
         self.calc_p0(dataloader)
@@ -94,7 +132,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         bc = torch.where(t_broadcast == 0, x_0_logits, out)
         return bc
 
-    def forward(self, x: torch.Tensor, cond: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, cond: torch.Tensor = None, *args) -> torch.Tensor:
         t, S, x_t = self.sample_point(x)
         # predict x_0 and prev(x_t)
         predicted_x0_logits = self.model_predict(x_t, t, cond, S)
@@ -124,6 +162,8 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         steps = 0
         images = []
         n_steps = S.sum(-1).sum(-1).sum(-1).max().item()
+        if n_steps > 1e6:
+            return None
         pbar = tqdm(total=n_steps, unit="iteration",
                     position=0, leave=True)
         trans_step = n_steps // n_T

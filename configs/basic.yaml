@@ -9,7 +9,7 @@ model:
     gamma: 0
     schedule_type: mutual_information
     forward_kwargs:
-        type: uniform
+        type: gaussian
         normalized: true
         bandwidth: 0.14
     hybrid_loss_coeff: 0.0

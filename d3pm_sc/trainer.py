@@ -20,29 +20,30 @@ def get_gif(sample_x, model, gen_trans_step, batch_size):
     images = model.sample_with_image_sequence(
         init_noise, cond, stride=3, n_T=gen_trans_step,
     )
-    # image sequences to gif
-    gif = []
-    for image in images:
-        x_as_image = make_grid(image.float() / (model.num_classes - 1), nrow=2)
-        img = x_as_image.permute(1, 2, 0).cpu().numpy()
-        img = (img * 255).astype(np.uint8)
-        gif.append(Image.fromarray(img))
-
-    with tempfile.NamedTemporaryFile(suffix='.gif', delete=False) as temp_file:
-        gif[0].save(
-            temp_file.name,
-            format='GIF',
-            save_all=True,
-            append_images=gif[1:],
-            duration=100,
-            loop=0,
-        )
-    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file_img:
-        last_img = gif[-1]
-        last_img.save(temp_file_img)
-    return temp_file.name, temp_file_img.name
+    if images is not None:
+        # image sequences to gif
+        gif = []
+        for image in images:
+            x_as_image = make_grid(image.float() / (model.num_classes - 1), nrow=2)
+            img = x_as_image.permute(1, 2, 0).cpu().numpy()
+            img = (img * 255).astype(np.uint8)
+            gif.append(Image.fromarray(img))
     
-    return buf
+        with tempfile.NamedTemporaryFile(suffix='.gif', delete=False) as temp_file:
+            gif[0].save(
+                temp_file.name,
+                format='GIF',
+                save_all=True,
+                append_images=gif[1:],
+                duration=100,
+                loop=0,
+            )
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file_img:
+            last_img = gif[-1]
+            last_img.save(temp_file_img)
+        return temp_file.name, temp_file_img.name
+    else: 
+        return None, None
     
 
 class DiffusionTrainer(pl.LightningModule):
@@ -126,9 +127,10 @@ class DiffusionTrainer(pl.LightningModule):
         if self.sample_x is not None:
             with torch.no_grad():
                 gif_fname, img_fname = get_gif(self.sample_x, self, self.gen_trans_step, self.n_gen_images)
-            if isinstance(self.logger, pl.loggers.WandbLogger):
-                wandb.log({"sample_gif": wandb.Image(gif_fname)})
-                wandb.log({"sample_gif_last": wandb.Image(img_fname)})
+            if gif_fname is not None:
+                if isinstance(self.logger, pl.loggers.WandbLogger):
+                    wandb.log({"sample_gif": wandb.Image(gif_fname)})
+                    wandb.log({"sample_gif_last": wandb.Image(img_fname)})
 
     def on_fit_start(self):
         if isinstance(self.logger, pl.loggers.WandbLogger):

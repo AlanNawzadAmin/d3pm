@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
 
-from .utils import kls, convert_to_distribution, get_inf_gens
+from .utils import kls, convert_to_distribution, get_L_and_K
 from .schedule_sample import sample_n_transitions_cont
 from .continuous_time_diffusion import ContinuousTimeDiffusion
 
@@ -16,7 +16,6 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         num_classes: int = 10,
         forward_kwargs={"type":"uniform"},
         schedule_type="cos",
-        gamma=0,
         hybrid_loss_coeff=0.01,
         fix_x_t_bias=False,
         logistic_pars=False,
@@ -26,10 +25,9 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         super().__init__(x0_model_class, nn_params, num_classes, schedule_type, hybrid_loss_coeff, logistic_pars, **kwargs)
         self.save_hyperparameters(ignore=['x0_model_class'])
         self.fix_x_t_bias = fix_x_t_bias
-        assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
         # Precalculate Ks
-        L = get_inf_gens(forward_kwargs, num_classes)
+        L, _, _ = get_L_and_K(forward_kwargs, num_classes, 0)
         self.register_buffer("L", L)
 
     def pre_configure_model(self, dataloader):
@@ -78,7 +76,7 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         ratios = ((ratios * self.L[x_t, :]).transpose(0, -1) * self.beta(t)).transpose(0, -1)
         return ratios
 
-    def forward(self, x: torch.Tensor, cond: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, cond: torch.Tensor = None, *args) -> torch.Tensor:
         t, _, x_t = self.sample_point(x)
         # predict x_0 and prev(x_t)
         predicted_x0_logits = self.model_predict(x_t, t, cond, None)

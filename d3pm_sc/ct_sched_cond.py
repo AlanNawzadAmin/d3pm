@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-from .utils import kls, convert_to_distribution, get_inf_gens
+from .utils import kls, convert_to_distribution, get_L_and_K
 from .schedule_sample import sample_n_transitions_cont
 from .continuous_time_diffusion import ContinuousTimeDiffusion
 
@@ -30,7 +30,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
         # Precalculate Ks
-        L, K, rate = get_L_and_K(forward_kwargs, num_classes, gamma)
+        _, K, rate = get_L_and_K(forward_kwargs, num_classes, gamma)
         self.rate = rate
         
         # Precalculate K_powers
@@ -58,8 +58,8 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
                     
                 self.K_powers = K_powers
 
-                self.register_buffer("K", K)
-                self.register_buffer("K_powers", K_powers)
+            self.register_buffer("K", K)
+            self.register_buffer("K_powers", K_powers)
             
         elif forward_kwargs['type'] == "uniform":
             n = num_classes
@@ -132,7 +132,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         bc = torch.where(t_broadcast == 0, x_0_logits, out)
         return bc
 
-    def forward(self, x: torch.Tensor, cond: torch.Tensor = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, cond: torch.Tensor = None, *args) -> torch.Tensor:
         t, S, x_t = self.sample_point(x)
         # predict x_0 and prev(x_t)
         predicted_x0_logits = self.model_predict(x_t, t, cond, S)
@@ -162,6 +162,8 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         steps = 0
         images = []
         n_steps = S.sum(-1).sum(-1).sum(-1).max().item()
+        if n_steps > 1e6:
+            return None
         pbar = tqdm(total=n_steps, unit="iteration",
                     position=0, leave=True)
         trans_step = n_steps // n_T

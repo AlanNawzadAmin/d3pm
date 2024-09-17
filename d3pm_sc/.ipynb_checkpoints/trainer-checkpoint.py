@@ -20,29 +20,30 @@ def get_gif(sample_x, model, gen_trans_step, batch_size):
     images = model.sample_with_image_sequence(
         init_noise, cond, stride=3, n_T=gen_trans_step,
     )
-    # image sequences to gif
-    gif = []
-    for image in images:
-        x_as_image = make_grid(image.float() / (model.num_classes - 1), nrow=2)
-        img = x_as_image.permute(1, 2, 0).cpu().numpy()
-        img = (img * 255).astype(np.uint8)
-        gif.append(Image.fromarray(img))
-
-    with tempfile.NamedTemporaryFile(suffix='.gif', delete=False) as temp_file:
-        gif[0].save(
-            temp_file.name,
-            format='GIF',
-            save_all=True,
-            append_images=gif[1:],
-            duration=100,
-            loop=0,
-        )
-    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file_img:
-        last_img = gif[-1]
-        last_img.save(temp_file_img)
-    return temp_file.name, temp_file_img.name
+    if images is not None:
+        # image sequences to gif
+        gif = []
+        for image in images:
+            x_as_image = make_grid(image.float() / (model.num_classes - 1), nrow=2)
+            img = x_as_image.permute(1, 2, 0).cpu().numpy()
+            img = (img * 255).astype(np.uint8)
+            gif.append(Image.fromarray(img))
     
-    return buf
+        with tempfile.NamedTemporaryFile(suffix='.gif', delete=False) as temp_file:
+            gif[0].save(
+                temp_file.name,
+                format='GIF',
+                save_all=True,
+                append_images=gif[1:],
+                duration=100,
+                loop=0,
+            )
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file_img:
+            last_img = gif[-1]
+            last_img.save(temp_file_img)
+        return temp_file.name, temp_file_img.name
+    else: 
+        return None, None
     
 
 class DiffusionTrainer(pl.LightningModule):
@@ -73,16 +74,25 @@ class DiffusionTrainer(pl.LightningModule):
         for i, batch in enumerate(dataloader):
             if p0.sum() > self.num_classes * 10000:  
                 break
-            x, _ = batch
+            if isinstance(batch, tuple): #image datasets
+                x, _ = batch
+            elif isinstance(batch, dict): #text datasets
+                x = batch['input_ids']
             p0 = p0 + F.one_hot(x.long(), num_classes=self.num_classes).float().view((-1, self.num_classes)).sum(0)
         p0 = p0 / p0.sum()
         self.p0 = p0
         # self.register_buffer("p0", p0)
 
     def training_step(self, batch, batch_idx):
-        x, cond = batch
+        if isinstance(batch, tuple): #image datasets
+            x, cond = batch
+            attn_mask = None
+        elif isinstance(batch, dict): #text datasets
+            x, attn_mask = batch['input_ids'], batch['attention_mask']
+            cond = batch['cond'] if 'cond' in batch else None
+
         # x, cond = x.to(device), cond.to(device)
-        loss, info = self(x, cond)
+        loss, info = self(x, cond, attn_mask)
         if self.sample_x is None:
             self.sample_x = x[:1]
         self.log('train_loss', info['vb_loss'], sync_dist=True)
@@ -92,10 +102,16 @@ class DiffusionTrainer(pl.LightningModule):
         # self.log('param_norm', param_norm, sync_dist=True)
         return loss
 
-    def validation_step(self, batch, batch_idx):
-        x, cond = batch
+    def validation_step(self, batch, batch_idx):        
+        if isinstance(batch, tuple): #image datasets
+            x, cond = batch
+            attn_mask = None
+        elif isinstance(batch, dict): #text datasets
+            x, attn_mask = batch['input_ids'], batch['attention_mask']
+            cond = batch['cond'] if 'cond' in batch else None
+
         # x, cond = x.to(device), cond.to(device)
-        loss, info = self(x, cond)
+        loss, info = self(x, cond, attn_mask)
         self.log('val_l01', info['vb_loss'], on_step=False, on_epoch=True, sync_dist=True)
         self.log('val_l1', self.get_kl_t1(x).detach().item(), on_step=False, on_epoch=True, sync_dist=True)
         self.log('val_ce_loss', info['ce_loss'], on_step=False, on_epoch=True, sync_dist=True)
@@ -111,9 +127,10 @@ class DiffusionTrainer(pl.LightningModule):
         if self.sample_x is not None:
             with torch.no_grad():
                 gif_fname, img_fname = get_gif(self.sample_x, self, self.gen_trans_step, self.n_gen_images)
-            if isinstance(self.logger, pl.loggers.WandbLogger):
-                wandb.log({"sample_gif": wandb.Image(gif_fname)})
-                wandb.log({"sample_gif_last": wandb.Image(img_fname)})
+            if gif_fname is not None:
+                if isinstance(self.logger, pl.loggers.WandbLogger):
+                    wandb.log({"sample_gif": wandb.Image(gif_fname)})
+                    wandb.log({"sample_gif_last": wandb.Image(img_fname)})
 
     def on_fit_start(self):
         if isinstance(self.logger, pl.loggers.WandbLogger):

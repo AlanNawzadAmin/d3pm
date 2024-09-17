@@ -12,8 +12,6 @@ from omegaconf import OmegaConf
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 
-from d3pm_sc.unet import UNet, KingmaUNet, SimpleUNet
-from d3pm_sc.dit import DiT_Llama
 
 from d3pm_sc.ct_sched_cond import ScheduleCondition
 from d3pm_sc.masking_diffusion import MaskingDiffusion

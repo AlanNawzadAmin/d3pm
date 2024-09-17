@@ -247,7 +247,7 @@ class UNet(nn.Module):
         self.norm_out = NormalizationLayer(prev_out)
         self.conv_out = nn.Conv2d(prev_out, out_channels, 3, padding=1)
 
-    @torch.compile(fullgraph=True, dynamic=False)
+    # @torch.compile(fullgraph=True, dynamic=False)
     def unet_main(self, x, temb, yemb):
         # Downsampling
         h = self.conv_in(x)
@@ -565,7 +565,6 @@ class GigaUNet(nn.Module):
                     torch.sin(s.reshape(*s.shape, 1) * 1000 * self.semb_sin / s_lengthscale),
                     torch.cos(s.reshape(*s.shape, 1) * 1000 * self.semb_sin / s_lengthscale)], dim=-1)
                 in_channels = ch * n_channel + s_embed_dim
-                freeze_layer(self.S_embed_sinusoid)
                 self.S_embed_nn = nn.Sequential(
                     nn.Linear(n_channel * s_dim, s_embed_dim),
                     nn.SiLU(),

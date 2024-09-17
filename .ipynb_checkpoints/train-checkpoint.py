@@ -12,8 +12,6 @@ from omegaconf import OmegaConf
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 
-from d3pm_sc.unet import UNet, KingmaUNet, SimpleUNet, GigaUNet
-from d3pm_sc.dit import DiT_Llama
 
 from d3pm_sc.ct_sched_cond import ScheduleCondition
 from d3pm_sc.masking_diffusion import MaskingDiffusion
@@ -21,29 +19,26 @@ from d3pm_sc.sedd import SEDD
 from d3pm_sc.d3pm_classic import D3PMClassic
 from d3pm_sc.discrete_sc import DiscreteScheduleCondition
 
+from nets import get_model_setup
+from data import get_dataloaders
+
+import getpass
+
+import os
+import certifi
+os.environ["SSL_CERT_FILE"] = certifi.where()
+
 @hydra.main(version_base=None, config_path="configs", config_name="basic")
 def train(cfg: DictConfig) -> None:
-    wandb.login(key="6a47f093d2a55e4f4e85b33767423f2db66355b8")
-    ##### Setup x0_model
-    schedule_conditioning = cfg.model.model in ["ScheduleCondition", "DiscreteScheduleCondition"]
-    nn_params = cfg.architecture.nn_params
-    nn_params = (OmegaConf.to_container(nn_params, resolve=True)
-                 if nn_params is not None else {})
-    nn_params = {"n_channel": 1 if cfg.data.data == 'MNIST' else 3, 
-                 "N": cfg.data.N + (cfg.model.model == 'MaskingDiffusion'),
-                 "n_T": cfg.model.n_T,
-                 "schedule_conditioning": schedule_conditioning,
-                 "s_dim": cfg.architecture.s_dim,
-                 **nn_params
-                }
-    # cfg.model.input_logits = nn_params["input_logits"]
-    nn_name_dict = {"SimpleUNet":SimpleUNet,
-                    "KingmaUNet":KingmaUNet,
-                    "UNet":UNet,
-                    "GigaUNet":GigaUNet,
-                    "DiT_Llama":DiT_Llama}
-    x0_model_class = nn_name_dict[cfg.architecture.x0_model_class]
+    wandb_key = "9e61d229e6b9dbfef3e2199c7e093a75bfe53135" if 'nvg' \
+        in getpass.getuser() else "6a47f093d2a55e4f4e85b33767423f2db66355b8"
+    wandb.login(key=wandb_key)
+    ##### Load data
+    train_dataloader, test_dataloader = get_dataloaders(cfg)
+    tokenizer = train_dataloader.tokenizer if hasattr(train_dataloader, "tokenizer") else None
 
+    ##### Setup x0_model
+    x0_model_class, nn_params = get_model_setup(cfg, tokenizer) 
     
     ##### Pick model
     model_name_dict = {"ScheduleCondition":ScheduleCondition,
@@ -54,7 +49,7 @@ def train(cfg: DictConfig) -> None:
     model = model_name_dict[cfg.model.model](
         x0_model_class,
         nn_params,
-        num_classes=cfg.data.N,
+        num_classes=len(tokenizer) if tokenizer else cfg.data.N,
         hybrid_loss_coeff=cfg.model.hybrid_loss_coeff,
         gamma=cfg.model.gamma,
         forward_kwargs=OmegaConf.to_container(cfg.model.forward_kwargs, resolve=True),
@@ -69,32 +64,7 @@ def train(cfg: DictConfig) -> None:
     )
 
     ##### Load data
-    batch_size = cfg.train.batch_size
-    data_name_dict = {"CIFAR10":CIFAR10, "MNIST":MNIST}
-    dataset = data_name_dict[cfg.data.data](
-        "./data",
-        train=True,
-        download=True,
-        transform=transforms.Compose(
-            [
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-            ]
-        ),
-    )
-    def collate_fn(batch):
-        x, cond = zip(*batch)
-        x = torch.stack(x)
-        cond = torch.tensor(cond)
-        cond = cond * cfg.data.conditional
-        x = (x * (cfg.data.N - 1)).round().long().clamp(0, cfg.data.N - 1)
-        return x, cond
-    train_size = int(len(dataset) * 0.9)
-    dataset, test_dataset = random_split(dataset, [train_size, len(dataset) - train_size])
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=16//torch.cuda.device_count(), collate_fn=collate_fn)
-    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=16//torch.cuda.device_count(), collate_fn=collate_fn)
-
-    model.pre_configure_model(dataloader)
+    model.pre_configure_model(train_dataloader)
     
     ##### Train
     wandb.init()
@@ -103,7 +73,7 @@ def train(cfg: DictConfig) -> None:
     torch.set_float32_matmul_precision('high')
     
     trainer = Trainer(max_epochs=cfg.train.n_epoch, accelerator='auto', devices=torch.cuda.device_count(), logger=wandb_logger, strategy="ddp")
-    trainer.fit(lightning_model, dataloader, test_dataloader)
+    trainer.fit(lightning_model, train_dataloader, test_dataloader)
     wandb.finish()
 
 if __name__ == "__main__":

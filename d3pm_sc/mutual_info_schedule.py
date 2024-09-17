@@ -17,7 +17,7 @@ def get_a_b_func_cont(L, p0):
                           torch.real((V[None,:, :] * evals_skew) @ V_inv), 
                           torch.eye(len(L)) + t[:, None, None] * L) # stable for small t
         p = p0[None, :, None] * mat
-        p = torch.where(p < 1e-10, 0, p)
+        p = torch.where(p < 1e-12, 0, p)
         mi_m1 = (torch.xlogy(p, p).sum(-1) - torch.xlogy(p.sum(-2), p.sum(-2))).sum(-1) / ent_p0
         return mi_m1 + t_shift
 
@@ -27,6 +27,7 @@ def get_a_b_func_cont(L, p0):
         # out = root_finder(mi, 0, 20/second_eval, ts)
         return -torch.where(out>1e-6, out, 1e-6)
     base_alphas = -log_alpha_naive(base_ts)
+    print(base_alphas)
     def log_alpha(ts):
         closest_index = torch.searchsorted(base_ts, ts.to('cpu'))
         best_guess_l = base_alphas[closest_index-1]
