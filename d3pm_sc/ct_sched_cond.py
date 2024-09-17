@@ -32,11 +32,8 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
 
         # Precalculate Ks
         L, K, rate = get_L_and_K(forward_kwargs, num_classes, gamma)
-        self.beta_scale = self.beta
-        self.beta = lambda t: rate * self.beta_scale(t)
-        self.log_alpha_scale = self.log_alpha
-        self.log_alpha  = lambda t: self.log_alpha_scale(t) * rate    
-    
+        self.rate = rate
+        
         # Precalculate K_powers
         num_powers = 50
         if num_classes < 100 or (forward_kwargs['type'] == "bert_embed"):

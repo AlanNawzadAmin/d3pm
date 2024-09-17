@@ -73,16 +73,25 @@ class DiffusionTrainer(pl.LightningModule):
         for i, batch in enumerate(dataloader):
             if p0.sum() > self.num_classes * 10000:  
                 break
-            x, _ = batch
+            if isinstance(batch, tuple): #image datasets
+                x, _ = batch
+            elif isinstance(batch, dict): #text datasets
+                x = batch['input_ids']
             p0 = p0 + F.one_hot(x.long(), num_classes=self.num_classes).float().view((-1, self.num_classes)).sum(0)
         p0 = p0 / p0.sum()
         self.p0 = p0
         # self.register_buffer("p0", p0)
 
     def training_step(self, batch, batch_idx):
-        x, cond = batch
+        if isinstance(batch, tuple): #image datasets
+            x, cond = batch
+            attn_mask = None
+        elif isinstance(batch, dict): #text datasets
+            x, attn_mask = batch['input_ids'], batch['attention_mask']
+            cond = batch['cond'] if 'cond' in batch else None
+
         # x, cond = x.to(device), cond.to(device)
-        loss, info = self(x, cond)
+        loss, info = self(x, cond, attn_mask)
         if self.sample_x is None:
             self.sample_x = x[:1]
         self.log('train_loss', info['vb_loss'], sync_dist=True)

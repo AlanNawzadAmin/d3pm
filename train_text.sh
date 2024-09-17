@@ -16,10 +16,3 @@ python train.py \
     +architecture.nn_params.scale_by_sigma=True \
     +architecture.nn_params.tie_word_embeddings=False \
     +architecture.nn_params.length=1024 \
-
-# config.n_blocks
-# config.hidden_size,
-# config.n_heads,
-# config.cond_dim,
-# config.dropout
-# config.scale_by_sigma

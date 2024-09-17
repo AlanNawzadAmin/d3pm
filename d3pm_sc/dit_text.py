@@ -331,17 +331,11 @@ class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
     self.vocab_size = vocab_size
     
     if schedule_conditioning:
-        self.S_embed = nn.Embedding(config.n_T, config.hidden_size)
-        self.S_embed.weight.data = torch.stack(
-            [torch.sin(torch.arange(config.n_T) * 3.1415 * 2**i) for i in range(config.s_dim // 2)] + 
-            [torch.cos(torch.arange(config.n_T) * 3.1415 * 2**i) for i in range(config.s_dim // 2)]
-        ).T
+        self.s_embed = TimestepEmbedder(config.cond_dim)
 
-    self.vocab_embed = EmbeddingLayer(config.hidden_size,
-                                      vocab_size)
+    self.vocab_embed = EmbeddingLayer(config.hidden_size, vocab_size)
     self.sigma_map = TimestepEmbedder(config.cond_dim)
-    self.rotary_emb = Rotary(
-      config.hidden_size // config.n_heads)
+    self.rotary_emb = Rotary(config.hidden_size // config.n_heads)
 
     blocks = []
     for i in range(config.n_blocks):
@@ -367,12 +361,14 @@ class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
     x = self.vocab_embed(indices)
     c = F.silu(self.sigma_map(sigma))
 
-    if S is not None:
-        s_embed = self.S_embed(S)
-        s_embed = s_embed.reshape(*s_embed.shape[:-2], -1).permute(0,3,1,2)
-
     rotary_cos_sin = self.rotary_emb(x)
 
+    # WIP, want to change to injecting at every layer by adding to c, but 
+    # we will need to get the shapes right
+    if S is not None:
+      S = F.silu(self.s_embed(S))
+      x = x + S
+    
     with torch.cuda.amp.autocast(dtype=torch.bfloat16):
       for i in range(len(self.blocks)):
         x = self.blocks[i](x, rotary_cos_sin, c, seqlens=None)

@@ -47,7 +47,7 @@ def get_L_and_K(forward_kwargs, num_classes, gamma):
         K = L / rate + torch.eye(num_classes)
     elif forward_kwargs['type'] == "bert_embed":
         embeds = BertModel.from_pretrained("bert-base-uncased").embeddings.word_embeddings.weight
-        embeds = embeds.detach().cpu().numpy()[:1000,:10]
+        embeds = embeds.detach().cpu().numpy()
         
         norms = np.linalg.norm(embeds, axis=1, keepdims=True)
         embeds_normalized = embeds / norms
