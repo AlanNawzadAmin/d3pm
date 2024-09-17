@@ -149,22 +149,24 @@ class UNet(nn.Module):
         if schedule_conditioning:
             in_channels = n_channel + n_channel * s_dim
 
-            s = torch.arange(1000).reshape(-1, 1) * 1000 / s_lengthscale
             emb_dim = s_dim//2
-            semb = 10000**(-torch.arange(emb_dim)/(emb_dim-1))
-            semb = torch.cat([torch.sin(s * semb), torch.cos(s * semb)], dim=1)
-        
-            self.S_embed_sinusoid = nn.Embedding(1000, s_dim)
-            self.S_embed_sinusoid.weight.data = semb
-            if semb_style!="learn_embed":
+            semb_sin = 10000**(-torch.arange(emb_dim)/(emb_dim-1))
+            self.register_buffer("semb_sin", semb_sin)
+            if semb_style != "learn_embed":
+                self.S_embed_sinusoid = lambda s: torch.cat([
+                    torch.sin(s.reshape(*s.shape, 1) * 1000 * self.semb_sin / s_lengthscale),
+                    torch.cos(s.reshape(*s.shape, 1) * 1000 * self.semb_sin / s_lengthscale)], dim=-1)
                 in_channels = n_channel + s_embed_dim
-                freeze_layer(self.S_embed_sinusoid)
                 self.S_embed_nn = nn.Sequential(
                     nn.Linear(n_channel * s_dim, s_embed_dim),
                     nn.SiLU(),
                     nn.Linear(s_embed_dim, s_embed_dim),
                 )
             else:
+                s = torch.arange(10000).reshape(-1, 1) * 1000 / s_lengthscale
+                semb = torch.cat([torch.sin(s * semb_sin), torch.cos(s * semb_sin)], dim=1)
+                self.S_embed_sinusoid = nn.Embedding(10000, s_dim)
+                self.S_embed_sinusoid.weight.data = semb
                 self.S_embed_nn = nn.Identity()
         else:
             in_channels= n_channel
@@ -348,16 +350,14 @@ class KingmaUNet(nn.Module):
         if schedule_conditioning:
             in_channels = ch * n_channel + n_channel * s_dim
 
-            s = torch.arange(1000).reshape(-1, 1) * 1000 / s_lengthscale
             emb_dim = s_dim//2
-            semb = 10000**(-torch.arange(emb_dim)/(emb_dim-1))
-            semb = torch.cat([torch.sin(s * semb), torch.cos(s * semb)], dim=1)
-        
-            self.S_embed_sinusoid = nn.Embedding(1000, s_dim)
-            self.S_embed_sinusoid.weight.data = semb
+            semb_sin = 10000**(-torch.arange(emb_dim)/(emb_dim-1))
+            self.register_buffer("semb_sin", semb_sin)
             if semb_style != "learn_embed":
+                self.S_embed_sinusoid = lambda s: torch.cat([
+                    torch.sin(s.reshape(*s.shape, 1) * 1000 * self.semb_sin / s_lengthscale),
+                    torch.cos(s.reshape(*s.shape, 1) * 1000 * self.semb_sin / s_lengthscale)], dim=-1)
                 in_channels = ch * n_channel + s_embed_dim
-                freeze_layer(self.S_embed_sinusoid)
                 self.S_embed_nn = nn.Sequential(
                     nn.Linear(n_channel * s_dim, s_embed_dim),
                     nn.SiLU(),
@@ -370,6 +370,10 @@ class KingmaUNet(nn.Module):
                         nn.Linear(s_embed_dim, ch * n_channel),
                     )
             else:
+                s = torch.arange(10000).reshape(-1, 1) * 1000 / s_lengthscale
+                semb = torch.cat([torch.sin(s * semb_sin), torch.cos(s * semb_sin)], dim=1)
+                self.S_embed_sinusoid = nn.Embedding(10000, s_dim)
+                self.S_embed_sinusoid.weight.data = semb
                 s_embed_dim = 0
                 self.S_embed_nn = nn.Identity()
             if semb_style != "u_inject":
@@ -535,7 +539,6 @@ class GigaUNet(nn.Module):
                  s_dim=16,
                  ch=128,
                  time_embed_dim=128,
-                 s_embed_dim=128,
                  num_classes=1,
                  n_layers=32,
                  inc_attn=False,
@@ -550,17 +553,17 @@ class GigaUNet(nn.Module):
                 ):
         super().__init__()
 
+        s_embed_dim = ch
         if schedule_conditioning:
-            in_channels = ch * n_channel + n_channel * s_dim
+            in_channels = ch * n_channel + s_embed_dim
 
-            s = torch.arange(1000).reshape(-1, 1) * 1000 / s_lengthscale
             emb_dim = s_dim//2
-            semb = 10000**(-torch.arange(emb_dim)/(emb_dim-1))
-            semb = torch.cat([torch.sin(s * semb), torch.cos(s * semb)], dim=1)
-        
-            self.S_embed_sinusoid = nn.Embedding(1000, s_dim)
-            self.S_embed_sinusoid.weight.data = semb
+            semb_sin = 10000**(-torch.arange(emb_dim)/(emb_dim-1))
+            self.register_buffer("semb_sin", semb_sin)
             if semb_style != "learn_embed":
+                self.S_embed_sinusoid = lambda s: torch.cat([
+                    torch.sin(s.reshape(*s.shape, 1) * 1000 * self.semb_sin / s_lengthscale),
+                    torch.cos(s.reshape(*s.shape, 1) * 1000 * self.semb_sin / s_lengthscale)], dim=-1)
                 in_channels = ch * n_channel + s_embed_dim
                 freeze_layer(self.S_embed_sinusoid)
                 self.S_embed_nn = nn.Sequential(
@@ -569,6 +572,10 @@ class GigaUNet(nn.Module):
                     nn.Linear(s_embed_dim, s_embed_dim),
                 )
             else:
+                s = torch.arange(10000).reshape(-1, 1) * 1000 / s_lengthscale
+                semb = torch.cat([torch.sin(s * semb_sin), torch.cos(s * semb_sin)], dim=1)
+                self.S_embed_sinusoid = nn.Embedding(10000, s_dim)
+                self.S_embed_sinusoid.weight.data = semb
                 s_embed_dim = 0
                 self.S_embed_nn = nn.Identity()
             if semb_style != "u_inject":

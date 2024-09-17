@@ -12,7 +12,7 @@ from omegaconf import OmegaConf
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 
-from d3pm_sc.unet import UNet, KingmaUNet, SimpleUNet
+from d3pm_sc.unet import UNet, KingmaUNet, SimpleUNet, GigaUNet
 from d3pm_sc.dit import DiT_Llama
 
 from d3pm_sc.ct_sched_cond import ScheduleCondition
@@ -36,9 +36,11 @@ def train(cfg: DictConfig) -> None:
                  "s_dim": cfg.architecture.s_dim,
                  **nn_params
                 }
+    # cfg.model.input_logits = nn_params["input_logits"]
     nn_name_dict = {"SimpleUNet":SimpleUNet,
                     "KingmaUNet":KingmaUNet,
                     "UNet":UNet,
+                    "GigaUNet":GigaUNet,
                     "DiT_Llama":DiT_Llama}
     x0_model_class = nn_name_dict[cfg.architecture.x0_model_class]
 
@@ -62,6 +64,7 @@ def train(cfg: DictConfig) -> None:
         n_T=cfg.model.n_T,
         t_max=cfg.model.t_max,
         seed=cfg.model.seed,
+        input_logits=cfg.model.input_logits,
         **OmegaConf.to_container(cfg.train, resolve=True),
     )
 

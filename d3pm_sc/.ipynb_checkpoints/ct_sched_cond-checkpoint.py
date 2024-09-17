@@ -33,7 +33,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         L = get_inf_gens(forward_kwargs, num_classes)
         rate = - (L.diagonal().min()) / (1-gamma) # L^* in sec 6.6 of the notes
         K = L / rate + torch.eye(num_classes)
-        K_powers = torch.stack([torch.linalg.matrix_power(K, i) for i in range(500)])
+        K_powers = torch.stack([torch.linalg.matrix_power(K, i) for i in range(5000)])
         self.rate = rate
         self.register_buffer("K", K)
         self.register_buffer("K_powers", K_powers)
