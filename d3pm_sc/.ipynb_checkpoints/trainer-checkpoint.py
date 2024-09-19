@@ -71,6 +71,7 @@ class DiffusionTrainer(pl.LightningModule):
     def calc_p0(self, dataloader):
         # get stationary dist
         p0 = torch.ones(self.num_classes)
+        pbar = tqdm(total=2e6)
         for i, batch in tqdm(enumerate(dataloader)):
             if p0.sum() > 2e6:  
                 break
@@ -78,7 +79,10 @@ class DiffusionTrainer(pl.LightningModule):
                 x, _ = batch
             elif isinstance(batch, dict): #text datasets
                 x = batch['input_ids']
-            p0 = p0 + F.one_hot(x.long(), num_classes=self.num_classes).float().view((-1, self.num_classes)).sum(0)
+            new =  F.one_hot(x.long(), num_classes=self.num_classes).float().view((-1, self.num_classes)).sum(0)
+            p0 = p0 + new
+            pbar.update(new.sum().item())
+        pbar.close()
         p0 = p0 / p0.sum()
         self.p0 = p0
         # self.register_buffer("p0", p0)

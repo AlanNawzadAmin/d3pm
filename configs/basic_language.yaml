@@ -14,11 +14,11 @@ model:
     schedule_type: mutual_information
     forward_kwargs:
         type: bert_embed
-        normalized: false
+        normalize: false
         make_sym: false
-        bandwidth: 0.2
-        knn: 10
-        uniform_rate: 0.1
+        bandwidth: 0.3
+        knn: 20
+        uniform_rate: 1
     hybrid_loss_coeff: 0.0
     logistic_pars: false
     fix_x_t_bias: false

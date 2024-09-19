@@ -1,7 +1,7 @@
 import torch
 from d3pm_sc.root_finder import root_finder, newton_root_finder
 
-def get_a_b_func_cont(L, p0):
+def get_a_b_func_cont(L, p0, **kwargs):
     ent_p0 = -torch.xlogy(p0, p0).sum()
     evals, V = torch.linalg.eig(L)
     evals[torch.real(evals) > -1e-6] = 0
@@ -27,7 +27,6 @@ def get_a_b_func_cont(L, p0):
         # out = root_finder(mi, 0, 20/second_eval, ts)
         return -torch.where(out>1e-6, out, 1e-6)
     base_alphas = -log_alpha_naive(base_ts)
-    print(base_alphas)
     def log_alpha(ts):
         closest_index = torch.searchsorted(base_ts, ts.to('cpu'))
         best_guess_l = base_alphas[closest_index-1]
@@ -43,7 +42,7 @@ def get_a_b_func_cont(L, p0):
     return log_alpha, beta, mi
 
 
-def get_a_b_func_sc(K, p0, precompute_mis=None, second_eval=None):
+def get_a_b_func_sc(K, p0, precompute_mis=None, second_eval=None, **kwargs):
     max_n = int(40 / second_eval)
     ent_p0 = -torch.xlogy(p0, p0).sum()
     if precompute_mis is None:

@@ -7,80 +7,7 @@ from .utils import kls, convert_to_distribution
 from .schedule_sample import sample_n_transitions_cont
 from .continuous_time_diffusion import ContinuousTimeDiffusion
 
-from transformers import BertModel, BertTokenizer
-import faiss
-import scipy
-
-def get_knn(k, embeds, mask_pairs):
-    range_ = np.arange(len(embeds))
-    indices = np.empty([len(embeds), k])
-    similarities = np.empty([len(embeds), k])
-    for mask, search_mask in mask_pairs:
-        if mask.sum()>0:
-            index = faiss.IndexFlatIP(embeds.shape[1]) 
-            index.add(embeds[search_mask])
-            similarities_temp, indices_temp = index.search(embeds[mask], k+1)
-            similarities[mask] = similarities_temp[:, 1:]
-            indices[mask] = range_[search_mask][indices_temp[:, 1:]]
-    return indices, similarities
-
-def get_L_and_K(forward_kwargs, gamma):
-    if forward_kwargs['type'] == "bert_embed":
-        embeds = BertModel.from_pretrained("bert-base-uncased").embeddings.word_embeddings.weight
-        tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
-        vocab = np.array(list(tokenizer.get_vocab().keys()))
-        embeds = embeds.detach().cpu().numpy()
-        
-        norms = np.linalg.norm(embeds, axis=1, keepdims=True)
-        embeds_normalized = embeds / norms
-        
-        print("Constructing nearest neighbor matrix...")
-        k = forward_kwargs['knn']
-        is_unused = 0 * np.array([t.startswith("[") and t.endswith("]") for t in vocab])
-        is_suffix = 0 * np.array([t.startswith("##") for t in vocab])
-        is_number = np.array([any([x in np.arange(10).astype(str) for x in t]) for t in vocab])
-        is_normal = ~np.any([is_unused, is_suffix, is_number], axis=0)
-        indices, similarities = get_knn(k, embeds_normalized,
-            [(is_number, is_number+is_normal), (is_normal, is_normal)])
-
-        print("Constructing sparse matrix...")
-        row_indices = np.repeat(np.arange(embeds.shape[0]), k) 
-        col_indices = indices.flatten()
-        dot_products = similarities.flatten()
-        # rates = distances.sum(-1)
-        assert (dot_products > 0).all()
-        assert (row_indices != col_indices).all()
-        if forward_kwargs['make_sym']:
-            row_indices, col_indices = np.r_[row_indices, col_indices], np.r_[col_indices, row_indices]
-            dot_products = np.r_[dot_products, dot_products]
-        dot_products = np.exp((1 - dot_products) / forward_kwargs['bandwidth'])
-
-        sparse_matrix = scipy.sparse.coo_array((dot_products, (row_indices, col_indices)),
-                                  shape=(embeds.shape[0], embeds.shape[0]))
-        sparse_matrix.sum_duplicates()
-        L_off_diag = sparse_matrix.tocsr()
-        L_diag = - L_off_diag.sum(-1)
-        if forward_kwargs['normalize']:
-            L_off_diag = L_off_diag / (-L_diag)[:, None]
-            L_diag = -1 + 0 * L_diag
-        rate = - (L_diag.min()) / (1-gamma) 
-        L_cpu = L_off_diag / rate + scipy.sparse.diags(L_diag / rate)
-        K_cpu = L_off_diag / rate + scipy.sparse.diags(L_diag / rate + 1)
-        
-        L_cpu = L_cpu.tocoo()
-        K_cpu = K_cpu.tocoo()
-        K = torch.sparse_coo_tensor((K_cpu.row, K_cpu.col), K_cpu.data,
-                                    size=(embeds.shape[0], embeds.shape[0])).float()
-        K = K.to_sparse_csr()
-        L = torch.sparse_coo_tensor((L_cpu.row, L_cpu.col), L_cpu.data,
-                                    size=(embeds.shape[0], embeds.shape[0])).float()
-        L = L.to_sparse_csr()
-        print("Done!")
-        return L, K, L_cpu, K_cpu, rate
-    if forward_kwargs['type'] == "uniform":
-        ...
-        return L, K, L_cpu, K_cpu, 0
-
+from .language_model_inf_gen import get_L_and_K
 
 class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning is True!
     def __init__(
@@ -145,6 +72,33 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         stationary = stationary / (stationary ** 2).sum()
         self.register_buffer("stationary", stationary)
 
+    def pre_configure_model(self, dataloader):
+        if not hasattr(self, 'p0'):
+            self.calc_p0(dataloader)
+        mis = []
+        p0_gpu = self.p0.cuda()
+        p0_gpu = p0_gpu / p0_gpu.sum()
+        mat = torch.eye(self.num_classes).float().cuda()
+        L_T_gpu = self.L_T.cuda()
+        stationary_gpu = self.stationary.cuda()
+        ent_p0 = -torch.xlogy(p0_gpu, p0_gpu).sum()
+        print("Getting Mutual info schedule")
+        pbar = tqdm(range(int(10/self.second_eval)))
+        for i in pbar:
+            p = p0_gpu[:, None] * mat.T
+            p = torch.where(p < 0, 0, p)
+            p_sum = p.sum(0)
+            mi = (torch.xlogy(p, p).sum(-1) - torch.xlogy(p_sum, p_sum)).sum(-1) / ent_p0 + 1
+            mis.append(mi)
+            pbar.set_description(f"MI:{mi.item()}")
+            mat = self.K_T_operator(L_T_gpu, mat)
+        self.precompute_mis = mis
+        self.log_alpha, self.beta, *_ = self.get_beta_func(None, self.p0, type_='schedule_condition', scale=self.rate, precompute_mis=mis, second_eval=self.second_eval)
+        del mat
+        import gc
+        torch.cuda.empty_cache()
+        gc.collect()
+
     def K_T_power_mult(self, S, x_0, period=1):
         shape = x_0.shape
         x_0 = x_0.reshape(-1, x_0.shape[-1]).T
@@ -165,27 +119,6 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         if curr_liks.shape[-1] > 0:
             liks[:, curr_S == 0] = curr_liks
         return liks.T.reshape(shape)
-    
-    def pre_configure_model(self, dataloader):
-        # self.calc_p0(dataloader)
-        mis = []
-        p0_gpu = self.p0.cuda()
-        mat = torch.eye(self.num_classes).float().cuda()
-        L_T_gpu = self.L_T.cuda()
-        stationary_gpu = self.stationary.cuda()
-        ent_p0 = -torch.xlogy(self.p0, self.p0).sum()
-        print("Getting Mutual info schedule")
-        for i in tqdm(range(int(10/self.second_eval))):
-            p = p0_gpu[:, None] * mat
-            p = torch.where(p < 0, 0, p)
-            mi = (torch.xlogy(p, p).sum(-1) - torch.xlogy(p.sum(-2), p.sum(-2))).sum(-1) / ent_p0 + 1
-            mis.append(mi)
-        
-            stat_part = stationary_gpu @ mat
-            diff = mat - stat_part * stationary_gpu[:, None]
-            mat = (stat_part * stationary_gpu[:, None] 
-                   + self.K_T_operator(L_T_gpu, diff))
-        self.log_alpha, self.beta, *_ = self.get_beta_func(None, self.p0, type_='schedule_condition', scale=self.rate, precompute_mis=mis, second_eval=self.second_eval)
     
     def get_stationary(self):
         return self.stationary / self.stationary.sum()
