@@ -183,6 +183,6 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
             "ce_loss": ce_loss.detach().item(),
         }
 
-    def sample_with_image_sequence(self, **kwargs):
+    def sample_with_image_sequence(self, *args, **kwargs):
         return None
 
