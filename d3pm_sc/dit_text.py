@@ -373,7 +373,7 @@ class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
     else:
       return  bias_dropout_add_scale_fused_inference
 
-  def forward(self, indices, sigma, S=None):
+  def forward(self, indices, sigma, cond=None, S=None):
     x = self.vocab_embed(indices)
     c = F.silu(self.sigma_map(sigma))
 
@@ -381,14 +381,14 @@ class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
 
     if S is not None:
       bs, seq_len = S.shape[0], S.shape[1]
-      S = F.silu(self.s_embed_input(S.reshape(-1))).reshape(bs, seq_len, -1)
-      x = x + S
+      S_out = F.silu(self.s_embed_input(S.reshape(-1))).reshape(bs, seq_len, -1)
+      x = x + S_out
       
       # WIP, this is approximately correct but not thoroughly tested
-      S = F.silu(self.s_embed_block(S.reshape(-1))).reshape(bs, seq_len, -1)
-      c = c[:, None] + S
+      S_out = F.silu(self.s_embed_block(S.reshape(-1))).reshape(bs, seq_len, -1)
+      c = c[:, None, :] + S_out
     
-    with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+    with torch.cuda.amp.autocast(dtype=torch.bfloat16): #bfloat16
       for i in range(len(self.blocks)):
         x = self.blocks[i](x, rotary_cos_sin, c, seqlens=None)
       x = self.output_layer(x, c)

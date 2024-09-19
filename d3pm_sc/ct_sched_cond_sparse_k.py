@@ -47,8 +47,11 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
                     + ((1-self.up) * L_T @ x_0_probs
                     +  self.up * (x_0_probs.mean(0) - x_0_probs) * (self.num_classes / (self.num_classes - 1))))
         def K_operator(x_t_index):
-            struct = self.K_coo.index_select(1, x_t.flatten()).to_dense().T.reshape(*x_t.shape, self.num_classes)
-            uniform = torch.eye(self.num_classes, device=x_t.device, dtype=torch.float())
+            struct = self.K_coo.index_select(1, x_t_index.flatten()
+                                            ).to_dense().T.reshape(
+                *x_t_index.shape, self.num_classes)
+            uniform = torch.eye(self.num_classes,
+                                device=x_t_index.device, dtype=torch.float32)
             uniform = (1 - uniform[x_t_index, :]) / (self.num_classes - 1)
             return (1-self.up) * struct + self.up * uniform
         self.K_T_operator = K_T_operator
@@ -90,6 +93,8 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
             p_sum = p.sum(0)
             mi = (torch.xlogy(p, p).sum(-1) - torch.xlogy(p_sum, p_sum)).sum(-1) / ent_p0 + 1
             mis.append(mi)
+            if mi < 1e-5:
+                break
             pbar.set_description(f"MI:{mi.item()}")
             mat = self.K_T_operator(L_T_gpu, mat)
         self.precompute_mis = mis
@@ -102,9 +107,9 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
     def K_T_power_mult(self, S, x_0, period=1):
         shape = x_0.shape
         x_0 = x_0.reshape(-1, x_0.shape[-1]).T
-        curr_liks = x_0
-        liks = torch.ones_like(x_0)
         curr_S = S.reshape(-1)
+        curr_liks = x_0[:, curr_S >= 0]
+        liks = torch.ones_like(x_0)
         while torch.any(curr_S > 0):
             active = curr_S >= 0
             liks[:, curr_S == 0] = curr_liks[:, (curr_S == 0)[active]]
@@ -136,7 +141,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
 
     def x_t_sample(self, x_0, t, noise, S):
         # forward process, x_0 is the clean input.
-        x_0_logits = convert_to_distribution(x, self.num_classes, self.eps)
+        x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
         softmaxed = torch.softmax(x_0_logits, dim=-1)
         logits = torch.log(self.K_T_power_mult(S, softmaxed) + self.eps)
         noise = torch.clip(noise, self.eps, 1.0)
@@ -147,7 +152,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
         fact1 = self.K_operator(x_t)
         softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
-        x_1 = self.K_T_power_mult(S-1, softmaxed)
+        fact2 = self.K_T_power_mult(S-1, softmaxed.float())
         out = torch.log(fact1 + self.eps) + torch.log(fact2 + self.eps)
         
         # check if t==0; then we calculate the distance to x_0
