@@ -1,0 +1,18 @@
+program: train.py
+method: grid
+command:
+  - ${env}
+  - python3
+  - ${program}
+  - --config-name=basic_language
+  - ${args_no_hyphens}
+metric:
+  name: val_l01
+  goal: minimize
+parameters:
+  model.seed:
+    value: 0
+  model.forward_kwargs.uniform_rate:
+    values: [0.5, 1, 4, 16, 64, 10000]
+  model.forward_kwargs.bandwidth:
+    values: [0.1, 0.3, 1]

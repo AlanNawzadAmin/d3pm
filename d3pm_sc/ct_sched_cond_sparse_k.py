@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from tqdm import tqdm
+import time
 
 from .utils import kls, convert_to_distribution
 from .schedule_sample import sample_n_transitions_cont
@@ -118,8 +119,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
                     break
             else:
                 curr_liks = curr_liks[:, (curr_S > 0)[active]]
-            probs = self.K_T_operator(self.L_T, curr_liks)
-            # x_curr = sample_probs(probs)
+            curr_liks = self.K_T_operator(self.L_T, curr_liks)
             curr_S = curr_S - 1
         if curr_liks.shape[-1] > 0:
             liks[:, curr_S == 0] = curr_liks
@@ -161,12 +161,21 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         return bc
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, *args) -> torch.Tensor:
+        # t0 = time.time()
         t, S, x_t = self.sample_point(x)
+        torch.cuda.synchronize()
+        # print("Time to sample:",  time.time() - t0)
         # predict x_0 and prev(x_t)
+        # t0 = time.time()
         predicted_x0_logits = self.model_predict(x_t, t, cond, S)
+        torch.cuda.synchronize()
+        # print("Time to predict:",  time.time() - t0)
+        # t0 = time.time()
         true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S)
         pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x_t, t, S)
-
+        torch.cuda.synchronize()
+        # print("Time to get logits:",  time.time() - t0)
+        
         # get kls and loss
         kl = kls(true_q_posterior_logits, pred_q_posterior_logits, self.eps) # shape x
         weight = - self.beta(t) / self.log_alpha(t)
@@ -178,6 +187,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         x = x.flatten(start_dim=0, end_dim=-1)
         ce_loss = torch.nn.CrossEntropyLoss()(predicted_x0_logits, x)
 
+        print(vb_loss)
         return self.hybrid_loss_coeff * ce_loss + vb_loss, {
             "vb_loss": vb_loss.detach().item(),
             "ce_loss": ce_loss.detach().item(),

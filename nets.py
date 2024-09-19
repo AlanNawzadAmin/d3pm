@@ -20,7 +20,8 @@ text_nn_name_dict = {
 def get_model_setup(cfg, tokenizer=None):
     if cfg.architecture.x0_model_class in image_nn_name_dict:
         schedule_conditioning = cfg.model.model in [
-            "ScheduleCondition", "DiscreteScheduleCondition"
+            "ScheduleCondition", "DiscreteScheduleCondition",
+            "ScheduleConditionSparseK"
         ]
         nn_params = cfg.architecture.nn_params
         nn_params = (OmegaConf.to_container(nn_params, resolve=True)
@@ -38,7 +39,8 @@ def get_model_setup(cfg, tokenizer=None):
     
     elif cfg.architecture.x0_model_class in text_nn_name_dict:
         schedule_conditioning = cfg.model.model in [
-            "ScheduleCondition", "DiscreteScheduleCondition"
+            "ScheduleCondition", "DiscreteScheduleCondition",
+            "ScheduleConditionSparseK"
         ]
         nn_params = cfg.architecture.nn_params
         nn_params = (OmegaConf.to_container(nn_params, resolve=True)

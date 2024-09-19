@@ -14,6 +14,7 @@ from pytorch_lightning.loggers import WandbLogger
 
 
 from d3pm_sc.ct_sched_cond import ScheduleCondition
+from d3pm_sc.ct_sched_cond_sparse_k import ScheduleConditionSparseK
 from d3pm_sc.masking_diffusion import MaskingDiffusion
 from d3pm_sc.sedd import SEDD
 from d3pm_sc.d3pm_classic import D3PMClassic
@@ -72,8 +73,9 @@ def train(cfg: DictConfig) -> None:
     wandb_logger = WandbLogger(project="debugging")
     lightning_model = model
     torch.set_float32_matmul_precision('high')
-    
-    trainer = Trainer(max_epochs=cfg.train.n_epoch, accelerator='auto', devices=torch.cuda.device_count(), logger=wandb_logger, strategy="ddp")
+
+    ddp = not cfg.model.model == "ScheduleConditionSparseK"
+    trainer = Trainer(max_epochs=cfg.train.n_epoch, accelerator='auto', devices=torch.cuda.device_count(), logger=wandb_logger, strategy="ddp" if ddp else 'auto')
     trainer.fit(lightning_model, train_dataloader, test_dataloader)
     wandb.finish()
 
