@@ -43,23 +43,25 @@ def get_a_b_func_cont(L, p0):
     return log_alpha, beta, mi
 
 
-def get_a_b_func_sc(K, p0):
-    evals, V = torch.linalg.eig(K - torch.eye(len(K), dtype=K.dtype))
-    evals[torch.real(evals) > -1e-6] = 0
-    second_eval = torch.real(evals)
-    second_eval = -second_eval.sort().values[-2]
+def get_a_b_func_sc(K, p0, precompute_mis=None, second_eval=None):
     max_n = int(40 / second_eval)
     ent_p0 = -torch.xlogy(p0, p0).sum()
-    V_inv = torch.linalg.inv(V)
-    def mi_p(n):
-        if n > 0:
-            mat = torch.real((V * ((1+evals[None, :]) ** n)) @ V_inv)
-        else:
-            mat = torch.eye(len(K), dtype=K.dtype)
-        p = p0[:, None] * mat
-        p = torch.where(p < 0, 0, p)
-        return (torch.xlogy(p, p).sum(-1) - torch.xlogy(p.sum(-2), p.sum(-2))).sum(-1) / ent_p0 + 1
-    precompute_mis = torch.tensor([mi_p(n) for n in range(max_n)])
+    if precompute_mis is None:
+        evals, V = torch.linalg.eig(K - torch.eye(len(K), dtype=K.dtype))
+        evals[torch.real(evals) > -1e-6] = 0
+        second_eval = torch.real(evals)
+        second_eval = -second_eval.sort().values[-2]
+        V_inv = torch.linalg.inv(V)
+        def mi_p(n):
+            if n > 0:
+                mat = torch.real((V * ((1+evals[None, :]) ** n)) @ V_inv)
+            else:
+                mat = torch.eye(len(K), dtype=K.dtype)
+            p = p0[:, None] * mat
+            p = torch.where(p < 0, 0, p)
+            return (torch.xlogy(p, p).sum(-1) - torch.xlogy(p.sum(-2), p.sum(-2))).sum(-1) / ent_p0 + 1
+        precompute_mis = [mi_p(n) for n in range(max_n)]
+    precompute_mis = torch.tensor(precompute_mis)
     precompute_mis = torch.maximum(precompute_mis, torch.zeros(1))
     max_n = (precompute_mis > 1e-7).sum()
     precompute_mis = torch.cummin(precompute_mis[:max_n], 0)[0]
@@ -93,6 +95,6 @@ def get_a_b_func_sc(K, p0):
 
 def get_a_b_func_mi(mat, p0, type_, **kwargs):
     if type_ == 'schedule_condition':
-        return get_a_b_func_sc(mat, p0)
+        return get_a_b_func_sc(mat, p0, **kwargs)
     elif type_ == 'SEDD':
-        return get_a_b_func_cont(mat, p0)
+        return get_a_b_func_cont(mat, p0, **kwargs)

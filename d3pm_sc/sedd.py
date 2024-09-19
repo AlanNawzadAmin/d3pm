@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
 
-from .utils import kls, convert_to_distribution, get_L_and_K
+from .utils import kls, convert_to_distribution, get_inf_gen
 from .schedule_sample import sample_n_transitions_cont
 from .continuous_time_diffusion import ContinuousTimeDiffusion
 
@@ -27,7 +27,7 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         self.fix_x_t_bias = fix_x_t_bias
 
         # Precalculate Ks
-        L, _, _ = get_L_and_K(forward_kwargs, num_classes, 0)
+        L = get_inf_gen(forward_kwargs, num_classes)
         self.register_buffer("L", L)
 
     def pre_configure_model(self, dataloader):

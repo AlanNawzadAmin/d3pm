@@ -8,7 +8,7 @@ import torch.optim as optim
 from PIL import Image
 from torchvision.utils import make_grid
 import torch.nn.functional as F
-
+from tqdm import tqdm
 
 def get_gif(sample_x, model, gen_trans_step, batch_size):
     # save images
@@ -71,8 +71,8 @@ class DiffusionTrainer(pl.LightningModule):
     def calc_p0(self, dataloader):
         # get stationary dist
         p0 = torch.ones(self.num_classes)
-        for i, batch in enumerate(dataloader):
-            if p0.sum() > self.num_classes * 10000:  
+        for i, batch in tqdm(enumerate(dataloader)):
+            if p0.sum() > 2e6:  
                 break
             if isinstance(batch, tuple): #image datasets
                 x, _ = batch

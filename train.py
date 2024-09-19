@@ -42,6 +42,7 @@ def train(cfg: DictConfig) -> None:
     
     ##### Pick model
     model_name_dict = {"ScheduleCondition":ScheduleCondition,
+                       "ScheduleConditionSparseK":ScheduleConditionSparseK,
                        "MaskingDiffusion":MaskingDiffusion,
                        "SEDD": SEDD,
                        "DiscreteScheduleCondition":DiscreteScheduleCondition,

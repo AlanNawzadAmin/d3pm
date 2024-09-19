@@ -1,6 +1,10 @@
 import numpy as np
 import torch
 import torch.nn
+from transformers import BertModel
+import faiss
+import scipy
+from scipy.sparse import coo_matrix
 
 def _at(a, t, x):
     # t is 1-d, x is integer value of 0 to num_classes - 1
@@ -25,7 +29,7 @@ def convert_to_distribution(x_0, num_classes, eps):
         x_0_logits = x_0.clone()
     return x_0_logits
 
-def get_inf_gens(forward_kwargs, num_classes):
+def get_inf_gen(forward_kwargs, num_classes, gamma):
     if forward_kwargs['type'] == "uniform":
         L = torch.ones(num_classes, num_classes) / (num_classes-1)
         L.diagonal().fill_(-1)
@@ -37,10 +41,9 @@ def get_inf_gens(forward_kwargs, num_classes):
         L = L / (L.sum(-1).max() - 1)
         L.diagonal().fill_(0)
         L[range_, range_] = -L.sum(-1)
-    if "normalize" in forward_kwargs.keys():
-        if forward_kwargs['normalize']:
-            L = L / (- L.diagonal()[:, None])
-            range_ = torch.arange(num_classes)
-            L.diagonal().fill_(0)
-            L[range_, range_] = -L.sum(-1)
+    if "normalize" in forward_kwargs.keys() and forward_kwargs['normalize']:
+        L = L / (- L.diagonal()[:, None])
+        range_ = torch.arange(num_classes)
+        L.diagonal().fill_(0)
+        L[range_, range_] = -L.sum(-1)
     return L
