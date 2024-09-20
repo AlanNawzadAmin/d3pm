@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.autograd import Function
 from tqdm import tqdm
 import time
 
@@ -10,6 +11,7 @@ from .continuous_time_diffusion import ContinuousTimeDiffusion
 
 from .language_model_inf_gen import get_L_and_K
 
+            
 class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning is True!
     def __init__(
         self,
@@ -25,17 +27,21 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         # Precalculate betas, define model_predict, p_sample
         super().__init__(x0_model_class, nn_params, num_classes, schedule_type, hybrid_loss_coeff, **kwargs)
         self.save_hyperparameters(ignore=['x0_model_class'])
+        self.cache_fact2 = False
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
         # not gonna implement fix_x_t_bias, input_logits, logistic_pars
         
         # Precalculate K_powers of KNN process
         L, K, L_cpu, K_cpu, rate = get_L_and_K(forward_kwargs, gamma)
 
+        self.register_buffer("K", K)
         self.register_buffer("L", L)
         K_coo = K.to_sparse_coo()
+        K_T = K_coo.transpose(0, 1).coalesce().to_sparse_csr()
         L_coo = L.to_sparse_coo()
         L_T = L_coo.transpose(0, 1).coalesce().to_sparse_csr()
         self.register_buffer("K_coo", K_coo)
+        self.register_buffer("K_T", K_T)
         self.register_buffer("L_T", L_T)
 
         # Add in uniform process
@@ -43,30 +49,26 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         self.rate = rate + self.unif_rate
         self.up = self.unif_rate / self.rate
         print("Uniform rate is:", self.up)
-        def K_T_operator(L_T, x_0_probs):
-            return (x_0_probs
-                    + ((1-self.up) * L_T @ x_0_probs
-                    +  self.up * (x_0_probs.mean(0) - x_0_probs) * (self.num_classes / (self.num_classes - 1))))
+        def K_T_operator(K_T, x_0_probs): # assumes x_0_probs are normalized
+            return (1-self.up) * (K_T @ x_0_probs) + self.up / self.num_classes
         def K_operator(x_t_index):
             struct = self.K_coo.index_select(1, x_t_index.flatten()
                                             ).to_dense().T.reshape(
                 *x_t_index.shape, self.num_classes)
-            uniform = torch.eye(self.num_classes,
-                                device=x_t_index.device, dtype=torch.float32)
-            uniform = (1 - uniform[x_t_index, :]) / (self.num_classes - 1)
-            return (1-self.up) * struct + self.up * uniform
+            return (1-self.up) * struct + self.up / self.num_classes
         self.K_T_operator = K_T_operator
         self.K_operator = K_operator
         
-        self.second_eval = self.up * (self.num_classes / (self.num_classes - 1))
+        self.second_eval = self.up
         self.calc_stationary()
 
     def calc_stationary(self):
-        L_T_gpu = self.L_T.cuda()
-        stationary = torch.ones(L_T_gpu.shape[0]).float().cuda()
+        K_T_gpu = self.K_T.cuda()
+        stationary = torch.ones(K_T_gpu.shape[0]).float().cuda()
+        stationary = stationary / stationary.sum()
         pbar = tqdm(range(100000))
         for i in pbar:
-            stationary_new = self.K_T_operator(L_T_gpu, stationary)
+            stationary_new = self.K_T_operator(K_T_gpu, stationary)
             err = torch.sqrt(((stationary_new - stationary) ** 2).sum())
             if torch.allclose(err, torch.zeros_like(err)):
                 break
@@ -83,7 +85,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         p0_gpu = self.p0.cuda()
         p0_gpu = p0_gpu / p0_gpu.sum()
         mat = torch.eye(self.num_classes).float().cuda()
-        L_T_gpu = self.L_T.cuda()
+        K_T_gpu = self.K_T.cuda()
         stationary_gpu = self.stationary.cuda()
         ent_p0 = -torch.xlogy(p0_gpu, p0_gpu).sum()
         print("Getting Mutual info schedule")
@@ -97,7 +99,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
             if mi < 1e-5:
                 break
             pbar.set_description(f"MI:{mi.item()}")
-            mat = self.K_T_operator(L_T_gpu, mat)
+            mat = self.K_T_operator(K_T_gpu, mat)
         self.precompute_mis = mis
         self.log_alpha, self.beta, *_ = self.get_beta_func(None, self.p0, type_='schedule_condition', scale=self.rate, precompute_mis=mis, second_eval=self.second_eval)
         del mat
@@ -105,25 +107,34 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         torch.cuda.empty_cache()
         gc.collect()
 
-    def K_T_power_mult(self, S, x_0, period=1):
-        shape = x_0.shape
-        x_0 = x_0.reshape(-1, x_0.shape[-1]).T
-        curr_S = S.reshape(-1)
-        curr_liks = x_0[:, curr_S >= 0]
-        liks = torch.ones_like(x_0)
-        while torch.any(curr_S > 0):
-            active = curr_S >= 0
-            liks[:, curr_S == 0] = curr_liks[:, (curr_S == 0)[active]]
-            if curr_liks.shape[-1] == 1:
-                if not all((curr_S > 0)[active]):
-                    break
-            else:
-                curr_liks = curr_liks[:, (curr_S > 0)[active]]
-            curr_liks = self.K_T_operator(self.L_T, curr_liks)
-            curr_S = curr_S - 1
-        if curr_liks.shape[-1] > 0:
-            liks[:, curr_S == 0] = curr_liks
-        return liks.T.reshape(shape)
+    def K_T_power_mult(self, S, x_0):
+        class K_T_power_mult_class(Function):
+            @staticmethod
+            def forward(ctx, S, x_0):
+                ctx.save_for_backward(S)
+                shape = x_0.shape
+                liks = x_0.reshape(-1, x_0.shape[-1]).T
+                max_power = S.max().item()
+                power_mask = (torch.arange(1, max_power + 1, device=S.device).unsqueeze(1)
+                              <= S.flatten().unsqueeze(0))
+                for i in range(max_power):
+                    active = power_mask[i]
+                    liks[:, active] = self.K_T_operator(self.K_T, liks[:, active])
+                return liks.T.reshape(shape)
+        
+            @staticmethod
+            def backward(ctx, grad_output):
+                S, = ctx.saved_tensors
+                shape = grad_output.shape
+                x_grad = grad_output.reshape(-1, grad_output.shape[-1]).T
+                max_power = S.max().item()
+                power_mask = (torch.arange(1, max_power + 1, device=S.device).unsqueeze(1)
+                              <= S.flatten().unsqueeze(0))
+                for i in range(max_power):
+                    active = power_mask[i]
+                    x_grad[:, active] = self.K_T_operator(self.K, x_grad[:, active])
+                return None, x_grad.T.reshape(shape)
+        return K_T_power_mult_class.apply(S, x_0)
     
     def get_stationary(self):
         return self.stationary / self.stationary.sum()
@@ -143,16 +154,24 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         # forward process, x_0 is the clean input.
         x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
         softmaxed = torch.softmax(x_0_logits, dim=-1)
-        logits = torch.log(self.K_T_power_mult(S, softmaxed) + self.eps)
+        if self.cache_fact2:
+            self.cache_sm1_power = self.K_T_power_mult(S-1, softmaxed)
+            x_t_probs = self.K_T_power_mult((S>0).long(), self.cache_sm1_power)
+        else:
+            x_t_probs = self.K_T_power_mult(S, softmaxed)
+        logits = torch.log(x_t_probs + self.eps)
         noise = torch.clip(noise, self.eps, 1.0)
         gumbel_noise = -torch.log(-torch.log(noise))
         return torch.argmax(logits + gumbel_noise, dim=-1)
 
-    def q_posterior_logits(self, x_0, x_t, t, S):
+    def q_posterior_logits(self, x_0, x_t, t, S, use_cached_fact2=False):
         x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
-        fact1 = self.K_operator(x_t)
         softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
-        fact2 = self.K_T_power_mult(S-1, softmaxed.float())
+        if use_cached_fact2:
+            fact2 = self.cache_sm1_power
+        else:
+            fact2 = self.K_T_power_mult(S-1, softmaxed.float())
+        fact1 = self.K_operator(x_t)
         out = torch.log(fact1 + self.eps) + torch.log(fact2 + self.eps)
         
         # check if t==0; then we calculate the distance to x_0
@@ -163,17 +182,17 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, *args) -> torch.Tensor:
         # t0 = time.time()
         t, S, x_t = self.sample_point(x)
-        torch.cuda.synchronize()
+        # torch.cuda.synchronize()
         # print("Time to sample:",  time.time() - t0)
         # predict x_0 and prev(x_t)
         # t0 = time.time()
         predicted_x0_logits = self.model_predict(x_t, t, cond, S)
-        torch.cuda.synchronize()
+        # torch.cuda.synchronize()
         # print("Time to predict:",  time.time() - t0)
         # t0 = time.time()
-        true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S)
+        true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S, use_cached_fact2=self.cache_fact2)
         pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x_t, t, S)
-        torch.cuda.synchronize()
+        # torch.cuda.synchronize()
         # print("Time to get logits:",  time.time() - t0)
         
         # get kls and loss
@@ -181,13 +200,15 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         weight = - self.beta(t) / self.log_alpha(t)
         weight = (S.swapaxes(0, -1) * weight).swapaxes(0, -1)
         vb_loss = (kl * weight).mean() * self.t_max
+        print(weight.min)
 
         # Also calculate cross entropy loss
         predicted_x0_logits = predicted_x0_logits.flatten(start_dim=0, end_dim=-2)
         x = x.flatten(start_dim=0, end_dim=-1)
         ce_loss = torch.nn.CrossEntropyLoss()(predicted_x0_logits, x)
 
-        print(vb_loss)
+        # print(vb_loss)
+        # print(ce_loss)
         return self.hybrid_loss_coeff * ce_loss + vb_loss, {
             "vb_loss": vb_loss.detach().item(),
             "ce_loss": ce_loss.detach().item(),
