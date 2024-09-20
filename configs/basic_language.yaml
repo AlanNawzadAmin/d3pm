@@ -27,6 +27,7 @@ model:
     n_T: 500
     t_max: 0.999
     input_logits: false
+    sedd_param: true
 
 architecture:
     s_dim: 128

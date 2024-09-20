@@ -22,12 +22,14 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         schedule_type="cos",
         gamma=0,
         hybrid_loss_coeff=0.01,
+        sedd_param=True,
         **kwargs
     ):
         # Precalculate betas, define model_predict, p_sample
         super().__init__(x0_model_class, nn_params, num_classes, schedule_type, hybrid_loss_coeff, **kwargs)
         self.save_hyperparameters(ignore=['x0_model_class'])
         self.cache_fact2 = True
+        self.sedd_param = sedd_param
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
         # not gonna implement fix_x_t_bias, input_logits, logistic_pars
         
@@ -188,20 +190,23 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         return bc
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, *args) -> torch.Tensor:
-        t0 = time.time()
+        # t0 = time.time()
         t, S, x_t = self.sample_point(x)
-        torch.cuda.synchronize()
-        print("Time to sample:",  time.time() - t0)
-        # predict x_0 and prev(x_t)
-        t0 = time.time()
+        # torch.cuda.synchronize()
+        # print("Time to sample:",  time.time() - t0)
+        # # predict x_0 and prev(x_t)
+        # t0 = time.time()
         predicted_x0_logits = self.model_predict(x_t, t, cond, S)
-        torch.cuda.synchronize()
-        print("Time to predict:",  time.time() - t0)
-        t0 = time.time()
+        # torch.cuda.synchronize()
+        # print("Time to predict:",  time.time() - t0)
+        # t0 = time.time()
         true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S, use_cached_fact2=self.cache_fact2)
-        pred_q_posterior_logits = predicted_x0_logits # self.q_posterior_logits(predicted_x0_logits, x_t, t, S)
-        torch.cuda.synchronize()
-        print("Time to get logits:",  time.time() - t0)
+        if self.sedd_param:
+            pred_q_posterior_logits = predicted_x0_logits
+        else:
+            pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x_t, t, S)
+        # torch.cuda.synchronize()
+        # print("Time to get logits:",  time.time() - t0)
         
         # get kls and loss
         kl = kls(true_q_posterior_logits, pred_q_posterior_logits, self.eps) # shape x

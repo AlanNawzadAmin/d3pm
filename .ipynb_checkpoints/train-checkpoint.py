@@ -11,7 +11,7 @@ from torchvision.datasets import MNIST, CIFAR10
 from omegaconf import OmegaConf
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
-
+from pytorch_lightning.strategies import DDPStrategy
 
 from d3pm_sc.ct_sched_cond import ScheduleCondition
 from d3pm_sc.ct_sched_cond_sparse_k import ScheduleConditionSparseK
@@ -29,7 +29,7 @@ import os
 import certifi
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
-@hydra.main(version_base=None, config_path="configs", config_name="basic")
+@hydra.main(version_base=None, config_path="configs", config_name="basic_language")
 def train(cfg: DictConfig) -> None:
     wandb_key = "9e61d229e6b9dbfef3e2199c7e093a75bfe53135" if 'nvg' \
         in getpass.getuser() else "6a47f093d2a55e4f4e85b33767423f2db66355b8"
@@ -40,6 +40,8 @@ def train(cfg: DictConfig) -> None:
 
     ##### Setup x0_model
     x0_model_class, nn_params = get_model_setup(cfg, tokenizer) 
+    
+    print(cfg)
     
     ##### Pick model
     model_name_dict = {"ScheduleCondition":ScheduleCondition,
@@ -61,21 +63,29 @@ def train(cfg: DictConfig) -> None:
         n_T=cfg.model.n_T,
         t_max=cfg.model.t_max,
         seed=cfg.model.seed,
+        sedd_param=cfg.model.sedd_param,
         input_logits=cfg.model.input_logits,
         **OmegaConf.to_container(cfg.train, resolve=True),
     )
 
     ##### Load data
     model.pre_configure_model(train_dataloader)
-    
+
     ##### Train
     wandb.init()
     wandb_logger = WandbLogger(project="debugging")
     lightning_model = model
     torch.set_float32_matmul_precision('high')
 
-    ddp = not cfg.model.model == "ScheduleConditionSparseK"
-    trainer = Trainer(max_epochs=cfg.train.n_epoch, accelerator='auto', devices=torch.cuda.device_count(), logger=wandb_logger, strategy="ddp" if ddp else 'auto')
+    # ddp = not cfg.model.model == "ScheduleConditionSparseK"
+    trainer = Trainer(
+        max_epochs=cfg.train.n_epoch, 
+        accelerator='auto', 
+        devices=torch.cuda.device_count(), 
+        logger=wandb_logger, 
+        # strategy="ddp",# if ddp else 'auto'
+        strategy=DDPStrategy(broadcast_buffers=False)
+    )
     trainer.fit(lightning_model, train_dataloader, test_dataloader)
     wandb.finish()
 
