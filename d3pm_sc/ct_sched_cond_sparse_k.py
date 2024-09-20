@@ -32,8 +32,10 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         # not gonna implement fix_x_t_bias, input_logits, logistic_pars
         
         # Precalculate K_powers of KNN process
+        self.forward_kwargs = forward_kwargs
         L, K, L_cpu, K_cpu, rate = get_L_and_K(forward_kwargs, gamma)
 
+        self.rate = rate
         self.register_buffer("K", K)
         self.register_buffer("L", L)
         K_coo = K.to_sparse_coo()
@@ -44,31 +46,14 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         self.register_buffer("K_T", K_T)
         self.register_buffer("L_T", L_T)
 
-        # Add in uniform process
-        self.unif_rate = forward_kwargs['uniform_rate']
-        self.rate = rate + self.unif_rate
-        self.up = self.unif_rate / self.rate
-        print("Uniform rate is:", self.up)
-        def K_T_operator(K_T, x_0_probs): # assumes x_0_probs are normalized
-            return (1-self.up) * (K_T @ x_0_probs) + self.up / self.num_classes
-        def K_operator(x_t_index):
-            struct = self.K_coo.index_select(1, x_t_index.flatten()
-                                            ).to_dense().T.reshape(
-                *x_t_index.shape, self.num_classes)
-            return (1-self.up) * struct + self.up / self.num_classes
-        self.K_T_operator = K_T_operator
-        self.K_operator = K_operator
-        
-        self.second_eval = self.up
-        self.calc_stationary()
-
     def calc_stationary(self):
         K_T_gpu = self.K_T.cuda()
+        stat_gpu = self.stat.cuda()
         stationary = torch.ones(K_T_gpu.shape[0]).float().cuda()
         stationary = stationary / stationary.sum()
         pbar = tqdm(range(100000))
         for i in pbar:
-            stationary_new = self.K_T_operator(K_T_gpu, stationary)
+            stationary_new = self.K_T_operator(K_T_gpu, stationary, stat_gpu)
             err = torch.sqrt(((stationary_new - stationary) ** 2).sum())
             if torch.allclose(err, torch.zeros_like(err)):
                 break
@@ -81,14 +66,37 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
     def pre_configure_model(self, dataloader):
         if not hasattr(self, 'p0'):
             self.calc_p0(dataloader)
+        print("Set up sparse mats")
+        # Add in uniform process
+        self.unif_to_stat = self.forward_kwargs['unif_to_stat']
+        stat = self.p0 if self.unif_to_stat else torch.ones(self.num_classes) / self.num_classes
+        self.register_buffer("stat", stat)
+        self.unif_rate = self.forward_kwargs['uniform_rate'] * torch.tensor(1-self.stat).max()
+        self.rate = self.rate + self.unif_rate
+        self.up = self.unif_rate / self.rate
+        print("Uniform rate is:", self.up)
+        def K_T_operator(K_T, x_0_probs, stat): # assumes x_0_probs are normalized
+            stat_broadcast = stat.view((self.num_classes,) + (1,) * (x_0_probs.dim()-1))
+            return (1-self.up) * (K_T @ x_0_probs) + self.up * stat_broadcast
+        def K_operator(x_t_index):
+            struct = self.K_coo.index_select(1, x_t_index.flatten()
+                                            ).to_dense().T.reshape(
+                *x_t_index.shape, self.num_classes)
+            return (1-self.up) * struct + self.up * self.stat[x_t_index].unsqueeze(-1)      
+        self.K_T_operator = K_T_operator
+        self.K_operator = K_operator
+        self.second_eval = self.up
+        self.calc_stationary()
+
+        print("Getting Mutual info schedule")
         mis = []
         p0_gpu = self.p0.cuda()
         p0_gpu = p0_gpu / p0_gpu.sum()
+        stat_cuda = self.stat.cuda()
         mat = torch.eye(self.num_classes).float().cuda()
         K_T_gpu = self.K_T.cuda()
         stationary_gpu = self.stationary.cuda()
         ent_p0 = -torch.xlogy(p0_gpu, p0_gpu).sum()
-        print("Getting Mutual info schedule")
         pbar = tqdm(range(int(10/self.second_eval)))
         for i in pbar:
             p = p0_gpu[:, None] * mat.T
@@ -99,7 +107,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
             if mi < 1e-5:
                 break
             pbar.set_description(f"MI:{mi.item()}")
-            mat = self.K_T_operator(K_T_gpu, mat)
+            mat = self.K_T_operator(K_T_gpu, mat, stat_cuda)
         self.precompute_mis = mis
         self.log_alpha, self.beta, *_ = self.get_beta_func(None, self.p0, type_='schedule_condition', scale=self.rate, precompute_mis=mis, second_eval=self.second_eval)
         del mat
@@ -119,7 +127,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
                               <= S.flatten().unsqueeze(0))
                 for i in range(max_power):
                     active = power_mask[i]
-                    liks[:, active] = self.K_T_operator(self.K_T, liks[:, active])
+                    liks[:, active] = self.K_T_operator(self.K_T, liks[:, active], self.stat)
                 return liks.T.reshape(shape)
         
             @staticmethod
@@ -132,8 +140,8 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
                               <= S.flatten().unsqueeze(0))
                 for i in range(max_power):
                     active = power_mask[i]
-                    x_grad[:, active] = self.K_T_operator(self.K, x_grad[:, active])
-                return None, x_grad.T.reshape(shape)
+                    x_grad[:, active] = self.K_T_operator(self.K, x_grad[:, active], self.stat)
+                return None, x_grad.T.reshape(shape).to(torch.bfloat16)
         return K_T_power_mult_class.apply(S, x_0)
     
     def get_stationary(self):
@@ -180,20 +188,20 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         return bc
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, *args) -> torch.Tensor:
-        # t0 = time.time()
+        t0 = time.time()
         t, S, x_t = self.sample_point(x)
-        # torch.cuda.synchronize()
-        # print("Time to sample:",  time.time() - t0)
+        torch.cuda.synchronize()
+        print("Time to sample:",  time.time() - t0)
         # predict x_0 and prev(x_t)
-        # t0 = time.time()
+        t0 = time.time()
         predicted_x0_logits = self.model_predict(x_t, t, cond, S)
-        # torch.cuda.synchronize()
-        # print("Time to predict:",  time.time() - t0)
-        # t0 = time.time()
+        torch.cuda.synchronize()
+        print("Time to predict:",  time.time() - t0)
+        t0 = time.time()
         true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S, use_cached_fact2=self.cache_fact2)
-        pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x_t, t, S)
-        # torch.cuda.synchronize()
-        # print("Time to get logits:",  time.time() - t0)
+        pred_q_posterior_logits = predicted_x0_logits # self.q_posterior_logits(predicted_x0_logits, x_t, t, S)
+        torch.cuda.synchronize()
+        print("Time to get logits:",  time.time() - t0)
         
         # get kls and loss
         kl = kls(true_q_posterior_logits, pred_q_posterior_logits, self.eps) # shape x

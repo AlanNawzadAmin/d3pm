@@ -4,6 +4,13 @@ from transformers import BertModel, BertTokenizer
 import faiss
 import scipy
 
+english_alphabet = [
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+    'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+    'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'
+]
+
 def get_knn(k, embeds, mask_pairs):
     range_ = np.arange(len(embeds))
     indices = np.empty([len(embeds), k])
@@ -29,12 +36,16 @@ def get_L_and_K(forward_kwargs, gamma):
         
         print("Constructing nearest neighbor matrix...")
         k = forward_kwargs['knn']
-        is_unused = 0 * np.array([t.startswith("[") and t.endswith("]") for t in vocab])
-        is_suffix = 0 * np.array([t.startswith("##") for t in vocab])
+        strong_masking = forward_kwargs['strong_masking']
+        is_unused = (not strong_masking) * np.array([t.startswith("[") and t.endswith("]") for t in vocab])
+        is_suffix = (not strong_masking) * np.array([t.startswith("##") for t in vocab])
+        not_english = (not strong_masking) * (~np.array([all([x in english_alphabet for x in t]) for t in vocab]))
         is_number = np.array([any([x in np.arange(10).astype(str) for x in t]) for t in vocab])
-        is_normal = ~np.any([is_unused, is_suffix, is_number], axis=0)
+        is_normal = ~np.any([is_unused, is_suffix, is_number, not_english], axis=0)
+        masking = ([(is_number, is_number+is_normal), (is_normal, is_normal)] if not strong_masking
+            else [(not_english, not_english), (is_unused, is_unused), (is_suffix, is_suffix), (is_number, is_number), (is_normal, is_normal)])
         indices, similarities = get_knn(k, embeds_normalized,
-            [(is_number, is_number+is_normal), (is_normal, is_normal)])
+            masking)
 
         print("Constructing sparse matrix...")
         row_indices = np.repeat(np.arange(embeds.shape[0]), k) 
@@ -54,7 +65,7 @@ def get_L_and_K(forward_kwargs, gamma):
         L_off_diag = sparse_matrix.tocsr()
         L_diag = - L_off_diag.sum(-1)
         if forward_kwargs['normalize']:
-            L_off_diag = L_off_diag / (-L_diag)[:, None]
+            L_off_diag = scipy.sparse.coo_array(L_off_diag / (-L_diag)[:, None])
             L_diag = -1 + 0 * L_diag
         rate = - (L_diag.min()) / (1-gamma) 
         L_cpu = L_off_diag / rate + scipy.sparse.diags(L_diag / rate)
