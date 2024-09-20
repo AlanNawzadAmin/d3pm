@@ -113,7 +113,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
             def forward(ctx, S, x_0):
                 ctx.save_for_backward(S)
                 shape = x_0.shape
-                liks = x_0.reshape(-1, x_0.shape[-1]).T
+                liks = x_0.reshape(-1, x_0.shape[-1]).clone().T
                 max_power = S.max().item()
                 power_mask = (torch.arange(1, max_power + 1, device=S.device).unsqueeze(1)
                               <= S.flatten().unsqueeze(0))
@@ -155,7 +155,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
         softmaxed = torch.softmax(x_0_logits, dim=-1)
         if self.cache_fact2:
-            self.cache_sm1_power = self.K_T_power_mult(S-1, softmaxed)
+            self.cache_sm1_power = self.K_T_power_mult(S-1, softmaxed.float())
             x_t_probs = self.K_T_power_mult((S>0).long(), self.cache_sm1_power)
         else:
             x_t_probs = self.K_T_power_mult(S, softmaxed)
@@ -166,7 +166,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
 
     def q_posterior_logits(self, x_0, x_t, t, S, use_cached_fact2=False):
         x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
-        softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
+        softmaxed = torch.softmax(x_0_logits, dim=-1)
         if use_cached_fact2:
             fact2 = self.cache_sm1_power
         else:
@@ -200,15 +200,14 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         weight = - self.beta(t) / self.log_alpha(t)
         weight = (S.swapaxes(0, -1) * weight).swapaxes(0, -1)
         vb_loss = (kl * weight).mean() * self.t_max
-        print(weight.min)
 
         # Also calculate cross entropy loss
         predicted_x0_logits = predicted_x0_logits.flatten(start_dim=0, end_dim=-2)
         x = x.flatten(start_dim=0, end_dim=-1)
         ce_loss = torch.nn.CrossEntropyLoss()(predicted_x0_logits, x)
 
-        # print(vb_loss)
-        # print(ce_loss)
+        print(vb_loss)
+        print(ce_loss)
         return self.hybrid_loss_coeff * ce_loss + vb_loss, {
             "vb_loss": vb_loss.detach().item(),
             "ce_loss": ce_loss.detach().item(),
@@ -216,4 +215,42 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
 
     def sample_with_image_sequence(self, *args, **kwargs):
         return None
+
+    def sample_with_text_sequence(self, x, cond=None, n_T=200, stride=10):
+        print(1)
+        t = self.t_max * torch.ones(x.shape[0], device=x.device)
+        S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
+        S = S.swapaxes(0, 1).reshape(*x.shape).long()
+        steps = 0
+        images = []
+        n_steps = S.sum(-1).sum(-1).sum(-1).max().item()
+        if n_steps > 1e6:
+            print("n_steps:", n_steps)
+            return None
+        pbar = tqdm(total=n_steps, unit="iteration",
+                    position=0, leave=True)
+        trans_step = n_steps // n_T
+        while S.sum() > 0:
+            # predict what comes next
+            x_next = self.p_sample(
+                x, t, cond, torch.rand((*x.shape, self.num_classes), device=x.device), S
+            )
+            for b in range(len(x)):
+                trans_indices = torch.argwhere(S[b] > 0)
+                trans_indices = trans_indices[torch.randperm(len(trans_indices))]
+                if len(trans_indices) > 0:
+                    # randomly transiiton
+                    for k in trans_indices[:trans_step]:
+                        x[b, k] = x_next[b, k]
+                        S[b, k] -= 1
+            pbar.update(trans_step)
+            steps += 1
+            if steps % stride == 0:
+                images.append(torch.clone(x))
+        pbar.close()
+        # if last step is not divisible by stride, we add the last image.
+        if steps % stride != 0:
+            images.append(x)
+
+        return images
 
