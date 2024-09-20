@@ -27,7 +27,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         # Precalculate betas, define model_predict, p_sample
         super().__init__(x0_model_class, nn_params, num_classes, schedule_type, hybrid_loss_coeff, **kwargs)
         self.save_hyperparameters(ignore=['x0_model_class'])
-        self.cache_fact2 = False
+        self.cache_fact2 = True
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
         # not gonna implement fix_x_t_bias, input_logits, logistic_pars
         
