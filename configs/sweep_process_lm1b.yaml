@@ -13,6 +13,8 @@ parameters:
   model.seed:
     value: 0
   model.forward_kwargs.uniform_rate:
-    values: [0.5, 1, 4, 16, 64, 10000]
+    values: [0.1, 0.2, 0.3, 0.99]
   model.forward_kwargs.bandwidth:
-    values: [0.1, 0.3, 1]
+    values: [0.05, 1]
+  model.forward_kwargs.knn:
+    values: [5, 50]

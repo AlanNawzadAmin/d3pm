@@ -71,9 +71,9 @@ class DiffusionTrainer(pl.LightningModule):
     def calc_p0(self, dataloader):
         # get stationary dist
         p0 = torch.ones(self.num_classes)
-        pbar = tqdm(total=2e5)
+        pbar = tqdm(total=2e6)
         for i, batch in tqdm(enumerate(dataloader)):
-            if p0.sum() > 2e5:  
+            if p0.sum() > 2e6:  
                 break
             if isinstance(batch, tuple): #image datasets
                 x, _ = batch

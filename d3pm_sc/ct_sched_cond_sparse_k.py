@@ -80,6 +80,8 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         def K_T_operator(K_T, x_0_probs, stat): # assumes x_0_probs are normalized
             stat_broadcast = stat.view((self.num_classes,) + (1,) * (x_0_probs.dim()-1))
             return (1-self.up) * (K_T @ x_0_probs) + self.up * stat_broadcast
+        def K_operator_vec(K, x_t_probs, stat):            
+            return (1-self.up) * (K @ x_t_probs) + self.up * stat @ x_t_probs
         def K_operator(x_t_index):
             struct = self.K_coo.index_select(1, x_t_index.flatten()
                                             ).to_dense().T.reshape(
@@ -142,7 +144,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
                               <= S.flatten().unsqueeze(0))
                 for i in range(max_power):
                     active = power_mask[i]
-                    x_grad[:, active] = self.K_T_operator(self.K, x_grad[:, active], self.stat)
+                    x_grad[:, active] = self.K_operator_vec(self.K, x_grad[:, active], self.stat)
                 return None, x_grad.T.reshape(shape).to(torch.bfloat16)
         return K_T_power_mult_class.apply(S, x_0)
     
