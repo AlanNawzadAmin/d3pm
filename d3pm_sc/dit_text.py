@@ -110,12 +110,14 @@ def rotate_half(x):
 def apply_rotary_pos_emb(qkv, cos, sin):
     try:
         import flash_attn.layers.rotary
-        cos = cos[0,:,0,0,:cos.shape[-1]//2]
-        sin = sin[0,:,0,0,:sin.shape[-1]//2]
+        cos_new = cos[0,:,0,0,:cos.shape[-1]//2]
+        sin_new = sin[0,:,0,0,:sin.shape[-1]//2]
         return flash_attn.layers.rotary.apply_rotary_emb_qkv_(
-            qkv, cos, sin
+            qkv, cos_new, sin_new
         )
     except:
+        # cos = cos.repeat(*([1] * (cos.dim()-1)), 2)[None,:,None,None,:]
+        # sin = sin.repeat(*([1] * (sin.dim()-1)), 2)[None,:,None,None,:]
         return (qkv * cos) + (rotate_half(qkv) * sin)
 
 

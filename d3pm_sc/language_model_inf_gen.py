@@ -24,12 +24,15 @@ def get_knn(k, embeds, mask_pairs):
             indices[mask] = range_[search_mask][indices_temp[:, 1:]]
     return indices, similarities
 
-def get_L_and_K(forward_kwargs, gamma):
+def get_L_and_K(forward_kwargs, gamma, inds=None):
     if forward_kwargs['type'] == "bert_embed":
         embeds = BertModel.from_pretrained("bert-base-uncased").embeddings.word_embeddings.weight
         tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
         vocab = np.array(list(tokenizer.get_vocab().keys()))
         embeds = embeds.detach().cpu().numpy()
+        if inds is not None:
+            vocab = vocab[inds]
+            embeds = embeds[inds]
         
         norms = np.linalg.norm(embeds, axis=1, keepdims=True)
         embeds_normalized = embeds / norms

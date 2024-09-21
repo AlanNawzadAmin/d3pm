@@ -1,0 +1,20 @@
+program: train.py
+method: grid
+command:
+  - ${env}
+  - python3
+  - ${program}
+  - --config-name=basic_language
+  - ${args_no_hyphens}
+metric:
+  name: val_l01
+  goal: minimize
+parameters:
+  model.seed:
+    value: 0
+  model.forward_kwargs.uniform_rate:
+    value: 0.99
+  model.forward_kwargs.unif_to_stat:
+    values: [true, false]
+  model.sedd_param:
+    values: [true, false]

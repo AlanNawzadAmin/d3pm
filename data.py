@@ -654,7 +654,7 @@ def get_text_dataloaders(
       streaming=False
     )
 
-  num_workers = 16//torch.cuda.device_count()
+  num_workers = 16//max([1, torch.cuda.device_count()])
 
   if skip_train:
     train_loader = None

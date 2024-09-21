@@ -47,7 +47,7 @@ def get_gif(sample_x, model, gen_trans_step, batch_size):
     
 
 class DiffusionTrainer(pl.LightningModule):
-    def __init__(self, lr=1e-3, gen_trans_step=200, n_gen_images=4, grad_clip_val=1, weight_decay=0, seed=0, **kwargs):
+    def __init__(self, lr=1e-3, gen_trans_step=200, n_gen_images=4, grad_clip_val=1, weight_decay=0, seed=0, n_stat_samples=2e6, **kwargs):
         super().__init__()
         self.save_hyperparameters()
         self.lr = lr
@@ -58,6 +58,7 @@ class DiffusionTrainer(pl.LightningModule):
         self.validation_step_outputs = []
         self.gen_trans_step = gen_trans_step
         self.n_gen_images = n_gen_images
+        self.n_stat_samples = n_stat_samples
 
     def forward(self, x):
         return NotImplementedError
@@ -71,9 +72,9 @@ class DiffusionTrainer(pl.LightningModule):
     def calc_p0(self, dataloader):
         # get stationary dist
         p0 = torch.ones(self.num_classes)
-        pbar = tqdm(total=2e6)
+        pbar = tqdm(total=self.n_stat_samples)
         for i, batch in tqdm(enumerate(dataloader)):
-            if p0.sum() > 2e6:  
+            if p0.sum() > self.n_stat_samples:  
                 break
             if isinstance(batch, tuple): #image datasets
                 x, _ = batch

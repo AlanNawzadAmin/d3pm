@@ -47,3 +47,46 @@ def get_inf_gen(forward_kwargs, num_classes, gamma):
         L.diagonal().fill_(0)
         L[range_, range_] = -L.sum(-1)
     return L
+
+def extract_sparse_csr_submatrix(csr_tensor, row_indices, col_indices):
+    # Convert to COO for easier manipulation
+    coo_tensor = csr_tensor.to_sparse_coo()
+    
+    # Convert input indices to tensors and sort them for efficient processing
+    row_indices = torch.as_tensor(row_indices, device=csr_tensor.device)
+    col_indices = torch.as_tensor(col_indices, device=csr_tensor.device)
+    sorted_row_indices, row_perm = torch.sort(row_indices)
+    sorted_col_indices, col_perm = torch.sort(col_indices)
+    
+    # Create boolean masks for rows and columns
+    row_mask = torch.zeros(csr_tensor.shape[0], dtype=torch.bool, device=csr_tensor.device)
+    col_mask = torch.zeros(csr_tensor.shape[1], dtype=torch.bool, device=csr_tensor.device)
+    row_mask[sorted_row_indices] = True
+    col_mask[sorted_col_indices] = True
+    
+    # Apply masks to get desired indices and values
+    mask = row_mask[coo_tensor.indices()[0]] & col_mask[coo_tensor.indices()[1]]
+    filtered_indices = coo_tensor.indices()[:, mask]
+    filtered_values = coo_tensor.values()[mask]
+    
+    # Remap row and column indices
+    row_map = torch.empty_like(row_mask, dtype=torch.long)
+    col_map = torch.empty_like(col_mask, dtype=torch.long)
+    row_map[sorted_row_indices] = torch.arange(len(row_indices), device=csr_tensor.device)
+    col_map[sorted_col_indices] = torch.arange(len(col_indices), device=csr_tensor.device)
+    
+    new_rows = row_map[filtered_indices[0]]
+    new_cols = col_map[filtered_indices[1]]
+    
+    # Reorder to match input order
+    new_rows = row_perm[new_rows]
+    new_cols = col_perm[new_cols]
+    
+    # Create new sparse tensor
+    new_indices = torch.stack([new_rows, new_cols])
+    new_shape = (len(row_indices), len(col_indices))
+    new_coo = torch.sparse_coo_tensor(new_indices, filtered_values, new_shape)
+    
+    # Convert back to CSR
+    return new_coo.to_sparse_csr()
+
