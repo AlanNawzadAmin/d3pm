@@ -111,7 +111,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
                                             ).to_dense().T.reshape(
                 *x_t_index.shape, self.eff_num_classes)
             unif_part = self.stat[torch.clamp(x_t_index, max=self.eff_num_classes-1)].unsqueeze(-1)   
-            struct = (1-self.up) * struct + self.up *  unif_part
+            struct = (1 - self.up) * struct + self.up * unif_part
             return torch.cat([struct, unif_part.expand(*unif_part.shape[:-1], self.num_classes - self.eff_num_classes)], dim=-1)
         self.K_T_operator = K_T_operator
         self.K_operator_vec = K_operator_vec
@@ -160,7 +160,8 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
                 active = power_mask[0]
                 liks[:self.eff_num_classes, active] = self.K_T_operator(
                         self.K_T, liks[:, active], self.stat)
-                liks[self.eff_num_classes:, active] = 0
+                if self.freq_order:
+                    liks[self.eff_num_classes:, active] = 0
                 submat = liks[:self.eff_num_classes, :]
                 # S>1
                 for i in np.arange(1, max_power):
@@ -178,10 +179,11 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
                               <= flat_S.unsqueeze(0))
                 final_mask = (torch.arange(1, max_power + 1, device=S.device).unsqueeze(1)
                               == flat_S.unsqueeze(0))
+                submat = x_grad[:self.eff_num_classes, :]
                 for i in range(max_power):
                     if self.freq_order:
-                        x_grad[self.eff_num_classes:, final_mask[i]] = self.stat @ x_grad[:self.eff_num_classes, final_mask[i]]
-                    x_grad[:self.eff_num_classes, power_mask[i]] = self.K_operator_vec(self.K, x_grad[:self.eff_num_classes, power_mask[i]], self.stat)
+                        x_grad[self.eff_num_classes:, final_mask[i]] = (1-self.up) * self.stat @ submat[:, final_mask[i]]
+                    submat[:, power_mask[i]] = self.K_operator_vec(self.K, submat[:, power_mask[i]], self.stat)
                 return None, x_grad.T.reshape(shape).to(torch.bfloat16)
         return K_T_power_mult_class.apply(S, x_0)
     
