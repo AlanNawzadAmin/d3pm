@@ -64,6 +64,7 @@ def train(cfg: DictConfig) -> None:
         t_max=cfg.model.t_max,
         seed=cfg.model.seed,
         sedd_param=cfg.model.sedd_param,
+        eff_num_classes=cfg.model.eff_num_classes,
         input_logits=cfg.model.input_logits,
         **OmegaConf.to_container(cfg.train, resolve=True),
     )

@@ -17,7 +17,7 @@ def convert_to_norm_distribution(x_0, num_classes, eps):
     if x_0.dtype == torch.int64 or x_0.dtype == torch.int32:
         softmax = torch.nn.functional.one_hot(x_0, num_classes).float()
     else:
-        softmax = torch.softmax(x_0.clone(), dim=-1)
+        softmax = torch.exp(x_0, dim=-1)
     return softmax
             
 class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning is True!
@@ -74,7 +74,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
             mat_inds = p0_inds[:self.eff_num_classes]
         else:
             self.freq_order = False
-            self.eff_num_classes = elf.num_classes
+            self.eff_num_classes = self.num_classes
             mat_inds = None
         
         # Precalculate K_powers of KNN process

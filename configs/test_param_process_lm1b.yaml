@@ -16,5 +16,5 @@ parameters:
     value: 0.99
   model.forward_kwargs.unif_to_stat:
     values: [true, false]
-  model.sedd_param:
-    values: [true, false]
+  model.forward_kwargs.uniform_rate:
+    values: [0.4, 0.99]

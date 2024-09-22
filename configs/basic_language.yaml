@@ -28,7 +28,7 @@ model:
     t_max: 0.999
     input_logits: false
     sedd_param: false
-    eff_num_classes: 10000
+    eff_num_classes: 200
 
 architecture:
     s_dim: 128
