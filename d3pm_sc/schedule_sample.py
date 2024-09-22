@@ -1,4 +1,5 @@
 import torch
+import time
 
 def sample_n_transitions(beta_t, batch_size, times):
     """ For a bunch of betas and times, simulate # transitions before

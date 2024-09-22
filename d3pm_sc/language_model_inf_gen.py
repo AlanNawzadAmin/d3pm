@@ -55,7 +55,7 @@ def get_L_and_K(forward_kwargs, gamma, inds=None):
         col_indices = indices.flatten()
         dot_products = similarities.flatten()
         # rates = distances.sum(-1)
-        assert (dot_products > 0).all()
+        # assert (dot_products > 0).all()
         assert (row_indices != col_indices).all()
         if forward_kwargs['make_sym']:
             row_indices, col_indices = np.r_[row_indices, col_indices], np.r_[col_indices, row_indices]

@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn
+import torch.nn.functional as F
 from transformers import BertModel
 import faiss
 import scipy
@@ -13,11 +14,10 @@ def _at(a, t, x):
     return a[t, x, :]
 
 def kls(dist1, dist2, eps): # KL of dists on last dim
-    out = torch.softmax(dist1 + eps, dim=-1) * (
-        torch.log_softmax(dist1 + eps, dim=-1)
-        - torch.log_softmax(dist2 + eps, dim=-1)
-    )
-    return out.sum(dim=-1)#.mean()
+    out = F.kl_div(torch.log_softmax(dist2 + eps, dim=-1),
+                   torch.log_softmax(dist1 + eps, dim=-1),
+                  log_target=True, reduction='none').sum(-1)
+    return out
 
 def convert_to_distribution(x_0, num_classes, eps):
     # returns log probs of x_0 as a distribution
@@ -89,4 +89,18 @@ def extract_sparse_csr_submatrix(csr_tensor, row_indices, col_indices):
     
     # Convert back to CSR
     return new_coo.to_sparse_csr()
+
+def get_sort_S(S):
+    S_flat, sort = torch.sort(S.flatten(), descending=True)
+    S_sort = S_flat.reshape(S.shape)
+    unsort = torch.zeros_like(sort)
+    unsort[sort] = torch.arange(len(S_flat), device=S_flat.device)
+    return S_sort, sort, unsort
+    
+def get_counts_S_flat(S_flat):
+    unique, counts = torch.unique(torch.clamp(S_flat, min=0), return_counts=True)
+    full_counts = torch.zeros(unique.max()+1, device=unique.device, dtype=torch.long)
+    full_counts[unique] = counts
+    return full_counts.flip(0).cumsum(0)
+
 

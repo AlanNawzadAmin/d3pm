@@ -5,12 +5,20 @@ from torch.autograd import Function
 from tqdm import tqdm
 import time
 
-from .utils import kls, convert_to_distribution
+from .utils import kls, get_sort_S, get_counts_S_flat
 from .schedule_sample import sample_n_transitions_cont
 from .continuous_time_diffusion import ContinuousTimeDiffusion
 
 from .language_model_inf_gen import get_L_and_K
 
+
+def convert_to_norm_distribution(x_0, num_classes, eps):
+    # returns log probs of x_0 as a distribution
+    if x_0.dtype == torch.int64 or x_0.dtype == torch.int32:
+        softmax = torch.nn.functional.one_hot(x_0, num_classes).float()
+    else:
+        softmax = torch.softmax(x_0.clone(), dim=-1)
+    return softmax
             
 class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning is True!
     def __init__(
@@ -76,10 +84,12 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         self.register_buffer("K", K)
         self.register_buffer("L", L)
         K_coo = K.to_sparse_coo()
+        K_csc = K.to_sparse_csc()
         K_T = K_coo.transpose(0, 1).coalesce().to_sparse_csr()
         L_coo = L.to_sparse_coo()
         L_T = L_coo.transpose(0, 1).coalesce().to_sparse_csr()
         self.register_buffer("K_coo", K_coo)
+        self.register_buffer("K_csc", K_csc)
         self.register_buffer("K_T", K_T)
         self.register_buffer("L_T", L_T)
 
@@ -93,29 +103,74 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         self.rate = self.rate + self.unif_rate
         self.up = self.unif_rate / self.rate
         print("Uniform rate is:", self.up)
-        def K_T_operator(K_T, x_0_probs, stat): # assumes x_0_probs are normalized
+        # @torch.jit.script
+        def K_T_operator_first(K_T, x_0_probs, stat, eff_num_classes:int, up:float): # assumes x_0_probs are normalized
+            x_0_probs_top = x_0_probs[:eff_num_classes]
+            other_part = x_0_probs[eff_num_classes:].sum(0)
+            stat_broadcast = stat.view((eff_num_classes,) + (1,) * (x_0_probs_top.dim()-1))
+            return (1-up) * (K_T @ x_0_probs_top) + (up + other_part*(1-up)) * stat_broadcast
+        # @torch.jit.script
+        def K_T_operator_next(K_T, x_0_probs, stat, eff_num_classes:int, up:float): # assumes x_0_probs are normalized
+            stat_broadcast = stat.view((eff_num_classes,) + (1,) * (x_0_probs.dim()-1))
+            return (1-up) * (K_T @ x_0_probs) + up * stat_broadcast
+        def K_csc_operator_next(K_csc, x_0_probs, stat, eff_num_classes:int, up:float): # assumes x_0_probs are normalized
+            return (1-up) * (x_0_probs @ K_csc) + up * stat
+        def K_T_operator(K_T, x_0_probs, stat):
             if len(x_0_probs) > self.eff_num_classes:
-                x_0_probs_top = x_0_probs[:self.eff_num_classes]
-                other_part = x_0_probs[self.eff_num_classes:].sum(0)
+                return K_T_operator_first(K_T, x_0_probs, stat, self.eff_num_classes, self.up)
             else:
-                x_0_probs_top = x_0_probs
-                other_part = 0
-            stat_broadcast = stat.view((self.eff_num_classes,) + (1,) * (x_0_probs_top.dim()-1))
-            return (1-self.up) * (K_T @ x_0_probs_top) + (self.up + other_part*(1-self.up)) * stat_broadcast
-        def K_operator_vec(K, x_t_probs, stat):        
+                return K_T_operator_next(K_T, x_0_probs, stat, self.eff_num_classes, self.up)
+        # @torch.jit.script
+        def K_operator_vec_jit(K, x_t_probs, stat, up):        
             """ Ignores rare tokens in input and output! """
-            return (1-self.up) * (K @ x_t_probs) + self.up * stat @ x_t_probs
+            return (1-up) * (K @ x_t_probs) + up * stat @ x_t_probs
+        def K_operator_vec(K, x_t_probs, stat):
+            return K_operator_vec_jit(K, x_t_probs, stat, self.up)
         def K_operator(x_t_index):
             """ Gives wrong answer when x_t has rare tokens! """
-            struct = self.K_coo.index_select(1, torch.clamp(x_t_index.flatten(), max=self.eff_num_classes-1)
-                                            ).to_dense().T.reshape(
-                *x_t_index.shape, self.eff_num_classes)
+            clamp_index = torch.clamp(x_t_index.flatten(), max=self.eff_num_classes-1)
+            struct = self.K_coo.index_select(1, clamp_index).to_dense()
+            struct = struct.T.reshape(*x_t_index.shape, self.eff_num_classes)
             unif_part = self.stat[torch.clamp(x_t_index, max=self.eff_num_classes-1)].unsqueeze(-1)   
             struct = (1 - self.up) * struct + self.up * unif_part
             return torch.cat([struct, unif_part.expand(*unif_part.shape[:-1], self.num_classes - self.eff_num_classes)], dim=-1)
+        # @torch.jit.script
+        def K_T_power_loop(liks, K_T, K_csc, start_indices, stat,
+                         eff_num_classes:int, freq_order:bool, up:float):
+            # S=1
+            active = start_indices[0]
+            liks[:eff_num_classes, :active] = K_T_operator_first(
+                    K_T, liks[:, :active], stat, eff_num_classes, up)
+            if freq_order:
+                liks[eff_num_classes:, :active] = 0
+            if len(start_indices) > 1:
+                submat = liks[:eff_num_classes, :]#.T.contiguous()
+                # S>1
+                for i in range(1, len(start_indices)):
+                    active = start_indices[i]
+                    submat[:, :active] = K_T_operator_next(K_T, submat[:, :active].contiguous(), stat,
+                                                         eff_num_classes, up)
+                # liks[:eff_num_classes, :] = submat.T
+            return liks
+        def K_power_loop(x_grad, K, start_indices, stat,
+                         eff_num_classes:int, freq_order:bool, up:float):
+            submat = x_grad[:eff_num_classes, :]
+            # S>1
+            for i in range(1, len(start_indices))[::-1]:
+                active = start_indices[i]
+                submat[:, :active] = K_operator_vec(K, submat[:, :active].contiguous(), stat)
+            # S=1
+            active = start_indices[0]
+            if freq_order:
+                x_grad[eff_num_classes:, :active] = (1-self.up) * stat @ submat[:, active]
+            submat[:, :active] = K_operator_vec(K, submat[:, :active], stat)
+            return x_grad
+
         self.K_T_operator = K_T_operator
         self.K_operator_vec = K_operator_vec
         self.K_operator = K_operator
+        self.K_T_power_loop = K_T_power_loop
+        self.K_power_loop = K_power_loop
         self.second_eval = self.up
         self.calc_stationary()
 
@@ -149,42 +204,22 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         class K_T_power_mult_class(Function):
             @staticmethod
             def forward(ctx, S, x_0):
-                flat_S = S.flatten()
-                ctx.save_for_backward(flat_S)
-                shape = x_0.shape
-                liks = x_0.reshape(-1, x_0.shape[-1]).clone().T
-                max_power = S.max().item()
-                power_mask = (torch.arange(1, max_power + 1, device=S.device).unsqueeze(1)
-                              <= flat_S.unsqueeze(0))
-                # S=1
-                active = power_mask[0]
-                liks[:self.eff_num_classes, active] = self.K_T_operator(
-                        self.K_T, liks[:, active], self.stat)
-                if self.freq_order:
-                    liks[self.eff_num_classes:, active] = 0
-                submat = liks[:self.eff_num_classes, :]
-                # S>1
-                for i in np.arange(1, max_power):
-                    active = power_mask[i]
-                    submat[:, active] = self.K_T_operator(self.K_T, submat[:, active], self.stat)
-                return liks.T.reshape(shape)
+                cumulative_counts = get_counts_S_flat(S.flatten())
+                start_indices = cumulative_counts[:-1].flip(0)
+                ctx.save_for_backward(start_indices)
+                liks = x_0.reshape(-1, x_0.shape[-1]).T.clone()
+                out = self.K_T_power_loop(
+                    liks, self.K_T, self.K_csc, start_indices, self.stat,
+                    self.eff_num_classes, self.freq_order, self.up)
+                return out.T.reshape(x_0.shape)
         
             @staticmethod
             def backward(ctx, grad_output):
-                flat_S, = ctx.saved_tensors
-                shape = grad_output.shape
+                start_indices, = ctx.saved_tensors
                 x_grad = grad_output.reshape(-1, grad_output.shape[-1]).T
-                max_power = S.max().item()
-                power_mask = (torch.arange(1, max_power + 1, device=S.device).unsqueeze(1)
-                              <= flat_S.unsqueeze(0))
-                final_mask = (torch.arange(1, max_power + 1, device=S.device).unsqueeze(1)
-                              == flat_S.unsqueeze(0))
-                submat = x_grad[:self.eff_num_classes, :]
-                for i in range(max_power):
-                    if self.freq_order:
-                        x_grad[self.eff_num_classes:, final_mask[i]] = (1-self.up) * self.stat @ submat[:, final_mask[i]]
-                    submat[:, power_mask[i]] = self.K_operator_vec(self.K, submat[:, power_mask[i]], self.stat)
-                return None, x_grad.T.reshape(shape).to(torch.bfloat16)
+                x_grad = self.K_power_loop(x_grad, self.K, start_indices, self.stat,
+                                      self.eff_num_classes, self.freq_order, self.up)
+                return None, x_grad.T.reshape(grad_output.shape)#.to(torch.bfloat16)
         return K_T_power_mult_class.apply(S, x_0)
     
     def get_stationary(self):
@@ -195,79 +230,77 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
         S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
         S = S.swapaxes(0, 1).reshape(*x.shape).long()
-        x_0_logits = convert_to_distribution(x, self.num_classes, self.eps)
-        softmaxed = torch.softmax(x_0_logits, dim=-1)
+        softmaxed = convert_to_norm_distribution(x, self.num_classes, self.eps)
         x_1 = self.K_T_power_mult(S, softmaxed)
         kl = kls(x_1[..., :self.eff_num_classes], self.get_stationary(), self.eps)
         return kl.mean()
 
     def x_t_sample(self, x_0, t, noise, S):
-        # forward process, x_0 is the clean input.
-        t0 = time.time()
-        x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
-        softmaxed = torch.softmax(x_0_logits, dim=-1)
+        S_sort, sort, unsort = get_sort_S(S)
+        softmaxed = convert_to_norm_distribution(x_0.flatten()[sort], self.num_classes, self.eps)
         if self.cache_fact2:
-            self.cache_sm1_power = self.K_T_power_mult(S-1, softmaxed.float())
+            self.cache_sm1_power = self.K_T_power_mult(S_sort-1, softmaxed.float())
             x_t_probs = self.K_T_power_mult((S>0).long(), self.cache_sm1_power)
         else:
-            x_t_probs = self.K_T_power_mult(S, softmaxed)
+            x_t_probs = self.K_T_power_mult(S_sort, softmaxed)
         probs = torch.cumsum(x_t_probs, -1)
         # print("normalization check:", probs[..., [-1]].min(), probs[..., [-1]].max())
-        x_t_sample = torch.argmax((probs > noise * probs[..., [-1]]).long(), dim=-1)
-        # logits = torch.log(x_t_probs + self.eps)
-        # noise = torch.clip(noise, self.eps, 1.0)
-        # gumbel_noise = -torch.log(-torch.log(noise))
-        # x_t_sample = torch.argmax(logits + gumbel_noise, dim=-1)
-        torch.cuda.synchronize()
-        print("Time to sample wo noise gen:",  time.time() - t0)
-        return x_t_sample
+        x_t_sample_sort = torch.argmax((probs > noise.flatten()[:, None] * probs[..., [-1]]).long(), dim=-1)
+        return x_t_sample_sort
 
-    def q_posterior_logits(self, x_0, x_t, t, S, use_cached_fact2=False):
-        x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
-        softmaxed = torch.softmax(x_0_logits, dim=-1)
+    def q_posterior_logits(self, x_0_sort, x_t_sort, t, S_sort, use_cached_fact2=False, log_fact1=None):
         if use_cached_fact2:
             fact2 = self.cache_sm1_power
-            # print("cache check:", ((fact2 - self.K_T_power_mult(S-1, softmaxed.float()))**2).sum())
+            # print("cache check:", ((fact2 - self.K_T_power_mult(S_sort-1, softmaxed.float()))**2).sum())
         else:
-            fact2 = self.K_T_power_mult(S-1, softmaxed.float())
-        fact1 = self.K_operator(x_t)
-        out = torch.log(fact2 + self.eps) + torch.log(fact1 + self.eps)
+            softmaxed = convert_to_norm_distribution(x_0_sort, self.num_classes, self.eps)
+            fact2 = self.K_T_power_mult(S_sort-1, softmaxed.float())
+        if log_fact1 is None:
+            log_fact1 = torch.log(self.K_operator(x_t_sort) + self.eps)
+        out = torch.log(fact2 + self.eps) + log_fact1
         return out
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, *args) -> torch.Tensor:
         if self.freq_order:
             x = self.p0_rank[x]
+        torch.cuda.synchronize()
         t0 = time.time()
-        t, S, x_t = self.sample_point(x, 1)
+        t, S, x_t_sort = self.sample_point(x, 1)
+        S_sort, sort, unsort = get_sort_S(S)
+        assert torch.all(sort[unsort] == torch.arange(len(sort), device=sort.device))
+        x_sort = x.flatten()[sort]
+        x_t = x_t_sort[unsort].reshape(x.shape)
+        log_fact1 = torch.log(self.K_operator(x_t_sort) + self.eps)
         torch.cuda.synchronize()
         print("Time to sample:",  time.time() - t0)
         # predict x_0 and prev(x_t)
+        torch.cuda.synchronize()
         t0 = time.time()
         predicted_x0_logits = self.model_predict(x_t, t, cond, S)
+        predicted_x0_logits_sort = predicted_x0_logits.reshape(-1, self.num_classes)[sort]
         torch.cuda.synchronize()
         print("Time to predict:",  time.time() - t0)
         t0 = time.time()
-        true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S, use_cached_fact2=self.cache_fact2)
+        true_q_posterior_logits = self.q_posterior_logits(x_sort, x_t_sort, t, S_sort, use_cached_fact2=self.cache_fact2, log_fact1=log_fact1)
         if self.sedd_param:
             pred_q_posterior_logits = predicted_x0_logits
         else:
-            pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x_t, t, S)
+            pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits_sort, x_t_sort, t, S_sort, log_fact1=log_fact1)
         torch.cuda.synchronize()
         print("Time to get logits:",  time.time() - t0)
         
         # get kls and loss
-        t0 = time.time()
-        kl = kls(true_q_posterior_logits, pred_q_posterior_logits, self.eps) # shape x
         weight = - self.beta(t) / self.log_alpha(t)
         weight = (S.swapaxes(0, -1) * weight).swapaxes(0, -1)
-        vb_loss = (kl * weight).mean() * self.t_max
+        torch.cuda.synchronize()
+        t0 = time.time()
+        kl = kls(true_q_posterior_logits, pred_q_posterior_logits, self.eps) # shape x
         torch.cuda.synchronize()
         print("Time to get kls:",  time.time() - t0)
+        vb_loss = (kl * weight.flatten()[sort]).mean() * self.t_max
 
         # Also calculate cross entropy loss
-        predicted_x0_logits = predicted_x0_logits.flatten(start_dim=0, end_dim=-2)
-        x = x.flatten(start_dim=0, end_dim=-1)
-        ce_loss = torch.nn.CrossEntropyLoss()(predicted_x0_logits, x)
+        ce_loss = torch.nn.CrossEntropyLoss()(predicted_x0_logits_sort, x_sort)
 
         print(vb_loss)
         print(ce_loss)

@@ -17,8 +17,8 @@ model:
         normalize: true
         make_sym: false
         bandwidth: 0.3
-        knn: 5
-        uniform_rate: 0.4
+        knn: 1
+        uniform_rate: 0.2
         unif_to_stat: true
         strong_masking: true
     hybrid_loss_coeff: 0.0
@@ -28,7 +28,7 @@ model:
     t_max: 0.999
     input_logits: false
     sedd_param: false
-    eff_num_classes: 3000
+    eff_num_classes: 10000
 
 architecture:
     s_dim: 128
@@ -45,7 +45,7 @@ architecture:
 
 train:
     batch_size: 32
-    n_epoch: 14
+    n_epoch: 2
     lr: 0.0003
     grad_clip_val: 1
     weight_decay: 0
