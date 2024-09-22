@@ -285,13 +285,13 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         vb_loss = (kl * weight.flatten()[sort]).mean() * self.t_max
 
         # Also calculate cross entropy loss
-        # ce_loss = torch.nn.CrossEntropyLoss()(predicted_x0_logits_sort, x_sort)
+        ce_loss = torch.nn.CrossEntropyLoss()(predicted_x0_logits_sort, x_sort)
 
         print(vb_loss)
-        # print(ce_loss)
+        print(ce_loss)
         return vb_loss, {
             "vb_loss": vb_loss.detach().item(),
-            "ce_loss": 0,#ce_loss.detach().item(),
+            "ce_loss": ce_loss.detach().item(),
         }
 
     def sample_with_image_sequence(self, *args, **kwargs):
