@@ -32,6 +32,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         hybrid_loss_coeff=0.01,
         sedd_param=True,
         eff_num_classes=1000000,
+        tokenizer='bert-base-uncased',
         **kwargs
     ):
         # Precalculate betas, define model_predict, p_sample
@@ -287,8 +288,8 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         # Also calculate cross entropy loss
         ce_loss = torch.nn.CrossEntropyLoss()(predicted_x0_logits_sort, x_sort)
 
-        print(vb_loss)
-        print(ce_loss)
+        # print(vb_loss)
+        # print(ce_loss)
         return vb_loss, {
             "vb_loss": vb_loss.detach().item(),
             "ce_loss": ce_loss.detach().item(),

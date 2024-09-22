@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from transformers import BertModel, BertTokenizer
+from transformers import BertModel, BertTokenizer, GPT2TokenizerFast, GPT2LMHeadModel
 import faiss
 import scipy
 
@@ -26,8 +26,12 @@ def get_knn(k, embeds, mask_pairs):
 
 def get_L_and_K(forward_kwargs, gamma, inds=None):
     if forward_kwargs['type'] == "bert_embed":
-        embeds = BertModel.from_pretrained("bert-base-uncased").embeddings.word_embeddings.weight
-        tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+        if forward_kwargs['tokenizer'] == 'bert-base-uncased':
+            embeds = BertModel.from_pretrained("bert-base-uncased").embeddings.word_embeddings.weight
+            tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+        elif forward_kwargs['tokenizer'] == 'gpt2':
+            tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
+            embeds = GPT2LMHeadModel.from_pretrained('gpt2').lm_head.weight
         vocab = np.array(list(tokenizer.get_vocab().keys()))
         embeds = embeds.detach().cpu().numpy()
         if inds is not None:
@@ -40,10 +44,10 @@ def get_L_and_K(forward_kwargs, gamma, inds=None):
         print("Constructing nearest neighbor matrix...")
         k = forward_kwargs['knn']
         strong_masking = forward_kwargs['strong_masking']
-        is_unused = (not strong_masking) * np.array([t.startswith("[") and t.endswith("]") for t in vocab])
-        is_suffix = (not strong_masking) * np.array([t.startswith("##") for t in vocab])
-        not_english = (not strong_masking) * (~np.array([all([x in english_alphabet for x in t]) for t in vocab]))
-        is_number = np.array([any([x in np.arange(10).astype(str) for x in t]) for t in vocab])
+        is_unused = ((strong_masking) * np.array([t.startswith("[") and t.endswith("]") for t in vocab])).astype(bool)
+        is_suffix = ((strong_masking) * np.array([t.startswith("##") for t in vocab])).astype(bool)
+        not_english = ((strong_masking) * (~np.array([all([x in english_alphabet for x in t]) for t in vocab]))).astype(bool)
+        is_number = (np.array([any([x in np.arange(10).astype(str) for x in t]) for t in vocab])).astype(bool)
         is_normal = ~np.any([is_unused, is_suffix, is_number, not_english], axis=0)
         masking = ([(is_number, is_number+is_normal), (is_normal, is_normal)] if not strong_masking
             else [(not_english, not_english), (is_unused, is_unused), (is_suffix, is_suffix), (is_number, is_number), (is_normal, is_normal)])

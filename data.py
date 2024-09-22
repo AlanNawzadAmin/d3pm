@@ -568,6 +568,9 @@ def get_tokenizer(config):
   elif config.data.tokenizer_name_or_path == 'bert-base-uncased':
     tokenizer = transformers.BertTokenizer.\
       from_pretrained('bert-base-uncased')
+  elif config.data.tokenizer_name_or_path == 'gpt2':
+    tokenizer = transformers.GPT2TokenizerFast.\
+      from_pretrained('gpt2')
   else:
     tokenizer = transformers.AutoTokenizer.from_pretrained(
       config.data.tokenizer_name_or_path)
