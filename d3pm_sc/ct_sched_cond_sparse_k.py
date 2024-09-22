@@ -263,50 +263,35 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, *args) -> torch.Tensor:
         if self.freq_order:
             x = self.p0_rank[x]
-        torch.cuda.synchronize()
-        t0 = time.time()
         t, S, x_t_sort = self.sample_point(x, 1)
         S_sort, sort, unsort = get_sort_S(S)
         assert torch.all(sort[unsort] == torch.arange(len(sort), device=sort.device))
         x_sort = x.flatten()[sort]
         x_t = x_t_sort[unsort].reshape(x.shape)
         log_fact1 = torch.log(self.K_operator(x_t_sort) + self.eps)
-        torch.cuda.synchronize()
-        print("Time to sample:",  time.time() - t0)
         # predict x_0 and prev(x_t)
-        torch.cuda.synchronize()
-        t0 = time.time()
         predicted_x0_logits = self.model_predict(x_t, t, cond, S)
         predicted_x0_logits_sort = predicted_x0_logits.reshape(-1, self.num_classes)[sort]
-        torch.cuda.synchronize()
-        print("Time to predict:",  time.time() - t0)
-        t0 = time.time()
         true_q_posterior_logits = self.q_posterior_logits(x_sort, x_t_sort, t, S_sort, use_cached_fact2=self.cache_fact2, log_fact1=log_fact1)
         if self.sedd_param:
             pred_q_posterior_logits = predicted_x0_logits
         else:
             pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits_sort, x_t_sort, t, S_sort, log_fact1=log_fact1)
-        torch.cuda.synchronize()
-        print("Time to get logits:",  time.time() - t0)
         
         # get kls and loss
         weight = - self.beta(t) / self.log_alpha(t)
         weight = (S.swapaxes(0, -1) * weight).swapaxes(0, -1)
-        torch.cuda.synchronize()
-        t0 = time.time()
         kl = kls(true_q_posterior_logits, pred_q_posterior_logits, self.eps) # shape x
-        torch.cuda.synchronize()
-        print("Time to get kls:",  time.time() - t0)
         vb_loss = (kl * weight.flatten()[sort]).mean() * self.t_max
 
         # Also calculate cross entropy loss
-        ce_loss = torch.nn.CrossEntropyLoss()(predicted_x0_logits_sort, x_sort)
+        # ce_loss = torch.nn.CrossEntropyLoss()(predicted_x0_logits_sort, x_sort)
 
         print(vb_loss)
-        print(ce_loss)
-        return self.hybrid_loss_coeff * ce_loss + vb_loss, {
+        # print(ce_loss)
+        return vb_loss, {
             "vb_loss": vb_loss.detach().item(),
-            "ce_loss": ce_loss.detach().item(),
+            "ce_loss": 0,#ce_loss.detach().item(),
         }
 
     def sample_with_image_sequence(self, *args, **kwargs):
