@@ -48,9 +48,13 @@ def get_L_and_K(forward_kwargs, gamma, inds=None):
         is_suffix = ((strong_masking) * np.array([t.startswith("##") for t in vocab])).astype(bool)
         not_english = ((strong_masking) * (~np.array([all([x in english_alphabet for x in t]) for t in vocab]))).astype(bool)
         is_number = (np.array([any([x in np.arange(10).astype(str) for x in t]) for t in vocab])).astype(bool)
-        is_normal = ~np.any([is_unused, is_suffix, is_number, not_english], axis=0)
+        masks = [is_unused, is_suffix, not_english, is_number]
+        for mask in masks:
+            if mask.sum() < k + 1:
+                mask = (0 * mask).astype(bool)
+        is_normal = ~np.any(masks, axis=0)
         masking = ([(is_number, is_number+is_normal), (is_normal, is_normal)] if not strong_masking
-            else [(not_english, not_english), (is_unused, is_unused), (is_suffix, is_suffix), (is_number, is_number), (is_normal, is_normal)])
+            else ([(m, m) for m in masks] + [(is_normal, is_normal)]))
         indices, similarities = get_knn(k, embeds_normalized,
             masking)
 

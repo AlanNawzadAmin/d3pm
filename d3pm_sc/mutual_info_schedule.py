@@ -43,13 +43,14 @@ def get_a_b_func_cont(L, p0, **kwargs):
 
 
 def get_a_b_func_sc(K, p0, precompute_mis=None, second_eval=None, **kwargs):
-    max_n = int(40 / second_eval)
-    ent_p0 = -torch.xlogy(p0, p0).sum()
-    if precompute_mis is None:
+    if second_eval is None:
         evals, V = torch.linalg.eig(K - torch.eye(len(K), dtype=K.dtype))
         evals[torch.real(evals) > -1e-6] = 0
         second_eval = torch.real(evals)
         second_eval = -second_eval.sort().values[-2]
+    max_n = int(40 / second_eval)
+    ent_p0 = -torch.xlogy(p0, p0).sum()
+    if precompute_mis is None:
         V_inv = torch.linalg.inv(V)
         def mi_p(n):
             if n > 0:

@@ -30,7 +30,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
         # Precalculate Ks
-        _, K, rate = get_inf_gen(forward_kwargs, num_classes)
+        L = get_inf_gen(forward_kwargs, num_classes)
         rate = - (L.diagonal().min()) / (1-gamma) # L^* in sec 6.6 of the notes
         K = L / rate + torch.eye(num_classes)
         self.rate = rate

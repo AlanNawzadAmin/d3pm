@@ -17,11 +17,11 @@ model:
         normalize: true
         make_sym: false
         bandwidth: 0.3
-        knn: 1
+        knn: 2
         uniform_rate: 0.2
         unif_to_stat: true
         strong_masking: true
-        tokenizer: 'bert-base-uncased'
+        tokenizer: bert-base-uncased
     hybrid_loss_coeff: 0.0
     logistic_pars: false
     fix_x_t_bias: false
@@ -29,7 +29,7 @@ model:
     t_max: 0.999
     input_logits: false
     sedd_param: false
-    eff_num_classes: 200
+    eff_num_classes: 3000
 
 architecture:
     s_dim: 128

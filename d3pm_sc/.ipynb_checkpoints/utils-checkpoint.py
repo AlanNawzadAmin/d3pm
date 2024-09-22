@@ -29,7 +29,7 @@ def convert_to_distribution(x_0, num_classes, eps):
         x_0_logits = x_0.clone()
     return x_0_logits
 
-def get_inf_gen(forward_kwargs, num_classes, gamma):
+def get_inf_gen(forward_kwargs, num_classes):
     if forward_kwargs['type'] == "uniform":
         L = torch.ones(num_classes, num_classes) / (num_classes-1)
         L.diagonal().fill_(-1)
