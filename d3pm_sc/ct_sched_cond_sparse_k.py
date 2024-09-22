@@ -17,7 +17,7 @@ def convert_to_norm_distribution(x_0, num_classes, eps):
     if x_0.dtype == torch.int64 or x_0.dtype == torch.int32:
         softmax = torch.nn.functional.one_hot(x_0, num_classes).float()
     else:
-        softmax = torch.exp(x_0, dim=-1)
+        softmax = torch.softmax(x_0, dim=-1)
     return softmax
             
 class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning is True!
@@ -243,9 +243,9 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
             x_t_probs = self.K_T_power_mult((S>0).long(), self.cache_sm1_power)
         else:
             x_t_probs = self.K_T_power_mult(S_sort, softmaxed)
-        probs = torch.cumsum(x_t_probs, -1)
         # print("normalization check:", probs[..., [-1]].min(), probs[..., [-1]].max())
-        x_t_sample_sort = torch.argmax((probs > noise.flatten()[:, None] * probs[..., [-1]]).long(), dim=-1)
+        inv_gumbel_noise = (1e-10 - (torch.rand_like(x_t_probs) + 1e-10).log())
+        x_t_sample_sort = torch.argmax(x_t_probs/inv_gumbel_noise, dim=-1)
         return x_t_sample_sort
 
     def q_posterior_logits(self, x_0_sort, x_t_sort, t, S_sort, use_cached_fact2=False, log_fact1=None):

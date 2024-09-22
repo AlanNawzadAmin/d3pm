@@ -14,8 +14,8 @@ def _at(a, t, x):
     return a[t, x, :]
 
 def kls(dist1, dist2, eps): # KL of dists on last dim
-    out = F.kl_div(torch.log_softmax(dist2 + eps, dim=-1),
-                   torch.log_softmax(dist1 + eps, dim=-1),
+    out = F.kl_div(torch.log_softmax(dist2, dim=-1),
+                   torch.log_softmax(dist1, dim=-1),
                   log_target=True, reduction='none').sum(-1)
     return out
 
