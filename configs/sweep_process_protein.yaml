@@ -1,0 +1,18 @@
+program: train.py
+method: grid
+command:
+  - ${env}
+  - python3
+  - ${program}
+  - --config-name=basic_protein
+  - ${args_no_hyphens}
+metric:
+  name: val_l01
+  goal: minimize
+parameters:
+  model.seed:
+    value: 0
+  model.forward_kwargs.beta:
+    values: [0.0001, 0.1, 0.3, 1, 3]
+  model.forward_kwargs.normalized:
+    values: [true, false]

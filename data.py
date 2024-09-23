@@ -31,6 +31,9 @@ image_data_name_dict = {
 text_data_name_dict = {
     "lm1b": None
 }
+protein_data_name_dict = {
+    "uniref50": None
+}
 
 def fsspec_exists(filename):
   """Check if a file exists using fsspec."""
@@ -725,11 +728,35 @@ def get_img_dataloaders(cfg):
 
     return train_dataloader, test_dataloader
 
+from sequence_models.datasets import UniRefDataset
+from evodiff.utils import Tokenizer
+from d3pm_sc.utils import _pad 
+def get_protein_dataloaders(cfg):
+    batch_size = cfg.train.batch_size
+
+    tokenizer = Tokenizer()
+    train_dataset = UniRefDataset('/scratch/aa11803/d3pm/data/uniref_2020/uniref50/', 'train', structure=False, max_len=1024)
+    test_dataset = UniRefDataset('/scratch/aa11803/d3pm/data/uniref_2020/uniref50/', 'test', structure=False, max_len=1024)
+    
+    def collate_fn(batch):
+        tokenized = [torch.tensor(tokenizer.tokenize(s)) for s in batch]
+        tokenized = _pad(tokenized, tokenizer.pad_id)
+        masks = tokenized != tokenizer.pad_id
+        return tokenized.long(), masks.float()
+    
+    num_workers = 16//torch.cuda.device_count()
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, collate_fn=collate_fn)
+
+    return train_dataloader, test_dataloader
+
 def get_dataloaders(cfg):
     if cfg.data.data in image_data_name_dict:
         return get_img_dataloaders(cfg)
     elif cfg.data.data in text_data_name_dict:
         tokenizer = get_tokenizer(cfg) 
         return get_text_dataloaders(cfg, tokenizer)
+    elif cfg.data.data in protein_data_name_dict:
+        return get_protein_dataloaders(cfg)
     else:
         pass

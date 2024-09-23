@@ -80,6 +80,12 @@ def train(cfg: DictConfig) -> None:
     torch.set_float32_matmul_precision('high')
 
     # ddp = not cfg.model.model == "ScheduleConditionSparseK"
+    if cfg.data.data == 'uniref50':
+        limit_val_batches = 210000//cfg.train.batch_size
+        val_check_interval = 10 * limit_val_batches
+    else:
+        limit_val_batches = 1.0
+        val_check_interval = 1.0
     trainer = Trainer(
         max_epochs=cfg.train.n_epoch, 
         accelerator='auto', 
@@ -87,7 +93,9 @@ def train(cfg: DictConfig) -> None:
         logger=wandb_logger, 
         # strategy="ddp",# if ddp else 'auto'
         strategy=DDPStrategy(broadcast_buffers=False),
-        callbacks=[EMA(0.9999)]
+        callbacks=[EMA(0.9999)],
+        limit_val_batches=limit_val_batches,
+        val_check_interval=val_check_interval,
     )
     trainer.fit(lightning_model, train_dataloader, test_dataloader)
     wandb.finish()
