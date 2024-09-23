@@ -89,7 +89,6 @@ class ByteNetLMTime(nn.Module):
         for layer, c_layer in zip(self.layers, self.c_mod_layers):
             x = layer(x, input_mask=input_mask.unsqueeze(-1))
             c_mod = c_layer(c)
-            print(c_mod.shape, c.shape)
             x = modulate_fused(x, *c_mod.chunk(2, dim=-1))
             if self.dropout > 0.0:
                 x = F.dropout(x, self.dropout)

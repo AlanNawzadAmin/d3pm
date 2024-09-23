@@ -735,8 +735,8 @@ def get_protein_dataloaders(cfg):
     batch_size = cfg.train.batch_size
 
     tokenizer = Tokenizer()
-    train_dataset = UniRefDataset('/vast/aa11803/uniref50_data/', 'train', structure=False, max_len=1024)
-    test_dataset = UniRefDataset('/vast/aa11803/uniref50_data/', 'test', structure=False, max_len=1024)
+    train_dataset = UniRefDataset('/scratch/aa11803/d3pm/data/uniref_2020/uniref50/', 'train', structure=False, max_len=1024)
+    test_dataset = UniRefDataset('/scratch/aa11803/d3pm/data/uniref_2020/uniref50/', 'test', structure=False, max_len=1024)
     
     def collate_fn(batch):
         tokenized = [torch.tensor(tokenizer.tokenize(s)) for s in batch]
