@@ -23,12 +23,14 @@ model:
 
 architecture:
     nn_params:
+        simple_embed: true
+        slim: true
     x0_model_class: Conv
 
 train:
     batch_size: 128
     n_epoch: 14
-    lr: 0.0002
+    lr: 0.0001
     grad_clip_val: 1
     weight_decay: 0
     gen_trans_step: 200

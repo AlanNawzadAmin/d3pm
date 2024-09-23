@@ -17,7 +17,7 @@ model:
         normalize: true
         make_sym: false
         bandwidth: 0.3
-        knn: 2
+        knn: 10
         uniform_rate: 0.2
         unif_to_stat: true
         strong_masking: true

@@ -14,10 +14,10 @@ class ByteNetLMTime(nn.Module):
             Output: (N, L, d)
     """
 
-    def __init__(self, n_tokens=31, d_embedding=128, d_model=1024, n_layer=16,
+    def __init__(self, simple_embed=True, n_tokens=31, d_aa_emb=8, d_embedding=128, d_model=1024, n_layer=16,
                  kernel_size=5, r=128, rank=None, n_frozen_embs=None,
                  padding_idx=None, causal=False, dropout=0.1, slim=True, activation='gelu',
-                 schedule_conditioning=True):
+                 schedule_conditioning=True, **kwargs):
         """
         :param n_tokens: number of tokens in token dictionary
         :param d_embedding: dimension of embedding
@@ -34,12 +34,18 @@ class ByteNetLMTime(nn.Module):
         :param down_embed: if True, have lower dimension for initial embedding than in CNN layers
         """
         super().__init__()
+        self.simple_embed = simple_embed
         self.time_encoding = TimestepEmbedder(d_embedding) # Timestep encoding
         self.time_mod_layer = nn.Linear(d_embedding, d_model)
+        self.schedule_conditioning = schedule_conditioning
         if schedule_conditioning:
             self.s_embed_input = TimestepEmbedder(d_model)
             self.s_embed_block = TimestepEmbedder(d_embedding)
-        self.embedder = nn.Embedding(n_tokens, d_model, padding_idx=padding_idx)
+        if not simple_embed:
+            self.embedder = nn.Embedding(n_tokens, d_aa_emb, padding_idx=padding_idx)
+            self.up_embedder = nn.Linear(d_aa_emb, d_model)
+        else:
+            self.embedder = nn.Embedding(n_tokens, d_model, padding_idx=padding_idx)
         log2 = int(np.log2(r)) + 1
         dilations = [2 ** (n % log2) for n in range(n_layer)]
         d_h = d_model
@@ -51,11 +57,14 @@ class ByteNetLMTime(nn.Module):
             for d in dilations
         ])
         self.c_mod_layers = nn.ModuleList([nn.Linear(d_embedding, 2*d_model) for d in dilations])
+        for layer in self.c_mod_layers:
+            layer.weight.data.zero_()
+            layer.bias.data.zero_()
         self.dropout = dropout
         self.decoder = PositionFeedForward(d_model, n_tokens)
         self.last_norm = nn.LayerNorm(d_model)
 
-    def forward(self, x, t, conv=None, S=None, input_mask=None):
+    def forward(self, x, t, input_mask=None, S=None):
         """
         :param x: (batch, length)
         :param y: (batch)
@@ -63,6 +72,8 @@ class ByteNetLMTime(nn.Module):
         :return: (batch, length,)
         """
         x = self.embedder(x)
+        if not self.simple_embed:
+            x = self.up_embedder(x)
         c = F.silu(self.time_encoding(t))[:, None, :]
 
         x = x + self.time_mod_layer(c)
@@ -76,9 +87,10 @@ class ByteNetLMTime(nn.Module):
             c = c + S_out
 
         for layer, c_layer in zip(self.layers, self.c_mod_layers):
-            x = layer(x, input_mask=input_mask)
+            x = layer(x, input_mask=input_mask.unsqueeze(-1))
             c_mod = c_layer(c)
-            modulate_fused(x, *c_mod.chunk(2, dim=-1))
+            print(c_mod.shape, c.shape)
+            x = modulate_fused(x, *c_mod.chunk(2, dim=-1))
             if self.dropout > 0.0:
                 x = F.dropout(x, self.dropout)
         return self.decoder(self.last_norm(x))

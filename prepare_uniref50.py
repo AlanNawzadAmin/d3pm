@@ -79,27 +79,27 @@ def create_splits(total_sequences, train_ratio=0.8, valid_ratio=0.1, test_ratio=
 
 def main():
     # Create data directory
-    data_dir = '/vast/aa11803/uniref50_data/'
+    data_dir = 'https://zenodo.org/records/6564798/files/uniref50.tar.gz?download=1'
     os.makedirs(data_dir, exist_ok=True)
     
     # Download UniRef50 2020_01 release
-    url = 'https://ftp.ebi.ac.uk/pub/databases/uniprot/previous_releases/release-2020_01/uniref/uniref2020_01.tar.gz'
+    url = 'uniref50.tar.gz'
     filename = os.path.join(data_dir, 'uniref2020_01.tar.gz')
     # download_file(url, filename)
     
-    # Extract UniRef50 FASTA file from the tar.gz archive
-    # uniref50_fasta = extract_uniref50(filename, data_dir)
+    # # Extract UniRef50 FASTA file from the tar.gz archive
+    # # uniref50_fasta = extract_uniref50(filename, data_dir)
     uniref50_fasta = 'data/uniref50.fasta'
     
-    # Process FASTA file
+    # # Process FASTA file
     consensus_file = os.path.join(data_dir, 'consensus.fasta')
     lengths_and_offsets_file = os.path.join(data_dir, 'lengths_and_offsets.npz')
-    process_fasta(uniref50_fasta, consensus_file, lengths_and_offsets_file)
+    # process_fasta(uniref50_fasta, consensus_file, lengths_and_offsets_file)
     
     # Create splits
     metadata = np.load(lengths_and_offsets_file)
     total_sequences = len(metadata['seq_offsets'])
-    splits = create_splits(total_sequences)
+    # splits = create_splits(total_sequences)
     
     # Save splits
     splits_file = os.path.join(data_dir, 'splits.json')
