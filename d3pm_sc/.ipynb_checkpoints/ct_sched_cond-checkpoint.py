@@ -98,7 +98,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         bc = torch.where(t_broadcast == 0, x_0_logits, out)
         return bc
 
-    def forward(self, x: torch.Tensor, cond: torch.Tensor = None, *args) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask=None,) -> torch.Tensor:
         t, S, x_t = self.sample_point(x)
         # predict x_0 and prev(x_t)
         predicted_x0_logits = self.model_predict(x_t, t, cond, S)
@@ -107,14 +107,22 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
 
         # get kls and loss
         kl = kls(true_q_posterior_logits, pred_q_posterior_logits, self.eps) # shape x
+        if attn_mask is not None:
+            kl = kl * attn_mask
         weight = - self.beta(t) / self.log_alpha(t)
         weight = (S.swapaxes(0, -1) * weight).swapaxes(0, -1)
         vb_loss = (kl * weight).mean() * self.t_max
+        if attn_mask is not None:
+            vb_loss = vb_loss / attn_mask.mean()
 
         # Also calculate cross entropy loss
         predicted_x0_logits = predicted_x0_logits.flatten(start_dim=0, end_dim=-2)
         x = x.flatten(start_dim=0, end_dim=-1)
+        if attn_mask is not None:
+            predicted_x0_logits = predicted_x0_logits * attn_mask
         ce_loss = torch.nn.CrossEntropyLoss()(predicted_x0_logits, x)
+        if attn_mask is not None:
+            ce_loss = ce_loss / attn_mask.mean()
 
         return self.hybrid_loss_coeff * ce_loss + vb_loss, {
             "vb_loss": vb_loss.detach().item(),
@@ -128,7 +136,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         steps = 0
         images = []
         n_steps = S.sum(-1).sum(-1).sum(-1).max().item()
-        if n_steps > 1e6:
+        if n_steps > 1e6 or x.dim() < 4:
             return None
         pbar = tqdm(total=n_steps, unit="iteration",
                     position=0, leave=True)

@@ -41,6 +41,27 @@ def get_inf_gen(forward_kwargs, num_classes):
         L = L / (L.sum(-1).max() - 1)
         L.diagonal().fill_(0)
         L[range_, range_] = -L.sum(-1)
+    elif forward_kwargs['type'] == "blosum":
+        from evodiff.utils import Tokenizer
+        tokenizer = Tokenizer()
+        # from https://web.expasy.org/protscale/pscale/A.A.Swiss-Prot.html
+        aa_freq = np.array([8.25, 5.53, 4.06, 5.45, 1.37, 3.93, 6.75,
+                            7.07, 2.27, 5.96, 9.66, 5.84, 2.42, 3.86,
+                            4.70, 6.56, 5.34, 1.08, 2.92, 6.87] + 11*[0]) / 100 
+        blosum_alphabet = np.array(list('ARNDCQEGHILKMFPSTWYVBZXJOU-'))
+        tok_alphabet = np.array(tokenizer.alphabet)
+        with open('/scratch/aa11803/d3pm/data/blosum62-special-MSA.mat') as f:
+            load_matrix = np.array([line.split()[1:] for line in f if line[0] in blosum_alphabet], dtype=int)
+        map_ = blosum_alphabet[:, None] == tok_alphabet[None, :]
+        blosum_matrix = np.zeros((len(tok_alphabet), len(tok_alphabet)))
+        for i, ind_i in enumerate(np.argmax(map_, axis=1)):
+            for j, ind_j in enumerate(np.argmax(map_, axis=1)):
+                blosum_matrix[ind_i, ind_j] = load_matrix[i, j]
+        # X_ij = BLOSUM_ij * p(aa_j) = p(aa_j | aa_i)
+        cond_liks = (2. ** (blosum_matrix/2)) * aa_freq[None, :] 
+        cond_liks = cond_liks ** forward_kwargs['beta']
+        cond_liks = cond_liks / cond_liks.sum(-1)[:, None]
+        L = torch.tensor(cond_liks - np.eye(len(cond_liks)))
     if "normalize" in forward_kwargs.keys() and forward_kwargs['normalize']:
         L = L / (- L.diagonal()[:, None])
         range_ = torch.arange(num_classes)
@@ -103,4 +124,25 @@ def get_counts_S_flat(S_flat):
     full_counts[unique] = counts
     return full_counts.flip(0).cumsum(0)
 
+def _pad(tokenized, value, dim=2):
+    """
+    Utility function that pads batches to the same length.
+
+    tokenized: list of tokenized sequences
+    value: pad index
+    """
+    batch_size = len(tokenized)
+    max_len = max(len(t) for t in tokenized)
+    if dim == 3: # dim = 3 (one hot)
+        categories = tokenized[0].shape[-1]
+        output = torch.zeros((batch_size, max_len, categories)) + value
+        for row, t in enumerate(tokenized):
+            output[row, :len(t), :] = t
+    elif dim == 2: # dim = 2 (tokenized)
+        output = torch.zeros((batch_size, max_len)) + value
+        for row, t in enumerate(tokenized):
+            output[row, :len(t)] = t
+    else:
+        print("padding not supported for dim > 3")
+    return output
 
