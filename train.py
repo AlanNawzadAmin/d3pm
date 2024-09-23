@@ -22,6 +22,7 @@ from d3pm_sc.discrete_sc import DiscreteScheduleCondition
 
 from nets import get_model_setup
 from data import get_dataloaders
+from ema import EMA
 
 import getpass
 
@@ -85,7 +86,8 @@ def train(cfg: DictConfig) -> None:
         devices=torch.cuda.device_count(), 
         logger=wandb_logger, 
         # strategy="ddp",# if ddp else 'auto'
-        strategy=DDPStrategy(broadcast_buffers=False)
+        strategy=DDPStrategy(broadcast_buffers=False),
+        callbacks=[EMA(0.9999)]
     )
     trainer.fit(lightning_model, train_dataloader, test_dataloader)
     wandb.finish()
