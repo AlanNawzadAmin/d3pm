@@ -116,13 +116,11 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
             vb_loss = vb_loss / attn_mask.mean()
 
         # Also calculate cross entropy loss
-        if attn_mask is not None:
-            predicted_x0_logits = predicted_x0_logits * attn_mask[..., None]
         predicted_x0_logits = predicted_x0_logits.flatten(start_dim=0, end_dim=-2)
         x = x.flatten(start_dim=0, end_dim=-1)
-        ce_loss = torch.nn.CrossEntropyLoss()(predicted_x0_logits, x)
+        ce_loss = torch.nn.CrossEntropyLoss(reduction='none')(predicted_x0_logits, x)
         if attn_mask is not None:
-            ce_loss = ce_loss / attn_mask.mean()
+            ce_loss = (ce_loss * attn_mask.flatten()).sum() / attn_mask.sum()
 
         return self.hybrid_loss_coeff * ce_loss + vb_loss, {
             "vb_loss": vb_loss.detach().item(),

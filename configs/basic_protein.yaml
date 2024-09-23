@@ -26,7 +26,7 @@ architecture:
     x0_model_class: Conv
 
 train:
-    batch_size: 32
+    batch_size: 128
     n_epoch: 14
     lr: 0.0002
     grad_clip_val: 1
