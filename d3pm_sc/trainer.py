@@ -141,7 +141,7 @@ class DiffusionTrainer(pl.LightningModule):
         if isinstance(self.logger, pl.loggers.WandbLogger):
             wandb.config.update(self.hparams)
 
-    def on_before_optimizer_step(self, optimizer):
+    def on_before_optimizer_step(self, optimizer, **kwargs):
         # Gradient clipping
         torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=self.grad_clip_val)
 
