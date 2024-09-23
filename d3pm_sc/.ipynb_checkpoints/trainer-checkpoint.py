@@ -91,11 +91,13 @@ class DiffusionTrainer(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         if isinstance(batch, tuple): #image datasets
             x, cond = batch
-            attn_mask = None
+            if cond is not None:
+                if cond.dim() == x.dim(): #protein datasets
+                    attn_mask = cond
+                    cond = None
         elif isinstance(batch, dict): #text datasets
             x, attn_mask = batch['input_ids'], batch['attention_mask']
             cond = batch['cond'] if 'cond' in batch else None
-
         # x, cond = x.to(device), cond.to(device)
         loss, info = self(x, cond, attn_mask)
         if self.sample_x is None:
@@ -111,6 +113,10 @@ class DiffusionTrainer(pl.LightningModule):
         if isinstance(batch, tuple): #image datasets
             x, cond = batch
             attn_mask = None
+            if cond is not None:
+                if cond.dim() == x.dim(): #protein datasets
+                    attn_mask = cond
+                    cond = None
         elif isinstance(batch, dict): #text datasets
             x, attn_mask = batch['input_ids'], batch['attention_mask']
             cond = batch['cond'] if 'cond' in batch else None

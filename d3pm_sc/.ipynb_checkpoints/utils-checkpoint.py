@@ -61,7 +61,7 @@ def get_inf_gen(forward_kwargs, num_classes):
         cond_liks = (2. ** (blosum_matrix/2)) * aa_freq[None, :] 
         cond_liks = cond_liks ** forward_kwargs['beta']
         cond_liks = cond_liks / cond_liks.sum(-1)[:, None]
-        L = torch.tensor(cond_liks - np.eye(len(cond_liks)))
+        L = torch.tensor(cond_liks - np.eye(len(cond_liks))).float()
     if "normalize" in forward_kwargs.keys() and forward_kwargs['normalize']:
         L = L / (- L.diagonal()[:, None])
         range_ = torch.arange(num_classes)

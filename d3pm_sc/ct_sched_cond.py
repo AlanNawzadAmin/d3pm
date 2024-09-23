@@ -54,7 +54,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         assert torch.allclose(torch.imag(stationary), torch.tensor(0, dtype=self.K.dtype))
         stationary = torch.real(stationary)
         stationary = stationary * torch.sign(stationary)
-        assert torch.all(stationary > 0)
+        assert torch.all(stationary >= 0)
         return stationary / stationary.sum()
 
     def base_predict(self, x_t, t, cond, S=None):
@@ -116,10 +116,10 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
             vb_loss = vb_loss / attn_mask.mean()
 
         # Also calculate cross entropy loss
+        if attn_mask is not None:
+            predicted_x0_logits = predicted_x0_logits * attn_mask[..., None]
         predicted_x0_logits = predicted_x0_logits.flatten(start_dim=0, end_dim=-2)
         x = x.flatten(start_dim=0, end_dim=-1)
-        if attn_mask is not None:
-            predicted_x0_logits = predicted_x0_logits * attn_mask
         ce_loss = torch.nn.CrossEntropyLoss()(predicted_x0_logits, x)
         if attn_mask is not None:
             ce_loss = ce_loss / attn_mask.mean()

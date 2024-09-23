@@ -55,7 +55,7 @@ class ByteNetLMTime(nn.Module):
         self.decoder = PositionFeedForward(d_model, n_tokens)
         self.last_norm = nn.LayerNorm(d_model)
 
-    def forward(self, x, t, S=None, input_mask=None):
+    def forward(self, x, t, conv=None, S=None, input_mask=None):
         """
         :param x: (batch, length)
         :param y: (batch)

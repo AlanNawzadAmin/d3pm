@@ -29,27 +29,32 @@ def extract_uniref50(tar_file, output_dir):
                 member.name = os.path.basename(member.name)
                 tar.extract(member, output_dir)
                 return os.path.join(output_dir, member.name)
-                
-def process_fasta(input_file, output_file, lengths_and_offsets_file):
+
+def process_fasta(uniref_file, output_file, lengths_and_offsets_file):
     offsets = []
     lengths = []
     
-    with open(input_file, 'r') as infile, open(output_file, 'w') as outfile:
-        # Skip header
-        for line in infile:
+    with open(uniref_file, 'r') as fasta_file, open(output_file, 'w') as outfile:
+        current_seq = ""
+        for line in tqdm(fasta_file, desc="Processing FASTA"):
             if line.startswith('>'):
-                break
-        
-        # Process sequences
-        for line in tqdm(infile, desc="Processing FASTA"):
-            if line.startswith('>'):
-                offset = outfile.tell()
-                offsets.append(offset)
+                if current_seq:
+                    offset = outfile.tell()
+                    offsets.append(offset)
+                    lengths.append(len(current_seq))
+                    outfile.write(current_seq + '\n')
+                    current_seq = ""
                 outfile.write(line)
             else:
-                seq = line.strip()
-                lengths.append(len(seq))
-                outfile.write(seq + '\n')
+                current_seq += line.strip()
+        
+        # Write the last sequence
+        if current_seq:
+            offset = outfile.tell()
+            offsets.append(offset)
+            lengths.append(len(current_seq))
+            outfile.write(current_seq + '\n')
+
     
     np.savez(lengths_and_offsets_file, seq_offsets=np.array(offsets), seq_lengths=np.array(lengths))
     
@@ -80,11 +85,11 @@ def main():
     # Download UniRef50 2020_01 release
     url = 'https://ftp.ebi.ac.uk/pub/databases/uniprot/previous_releases/release-2020_01/uniref/uniref2020_01.tar.gz'
     filename = os.path.join(data_dir, 'uniref2020_01.tar.gz')
-    download_file(url, filename)
+    # download_file(url, filename)
     
     # Extract UniRef50 FASTA file from the tar.gz archive
-    uniref50_fasta = extract_uniref50(filename, data_dir)
-    # uniref50_fasta = os.path.join(data_dir, 'uniref50.tar')
+    # uniref50_fasta = extract_uniref50(filename, data_dir)
+    uniref50_fasta = 'data/uniref50.fasta'
     
     # Process FASTA file
     consensus_file = os.path.join(data_dir, 'consensus.fasta')
@@ -100,7 +105,7 @@ def main():
     splits_file = os.path.join(data_dir, 'splits.json')
     with open(splits_file, 'w') as f:
         json.dump(splits, f)
-        
+    
     print(f"Processing complete. Data saved in {data_dir}")
     print(f"Total sequences: {total_sequences}")
     print(f"Train set size: {len(splits['train'])}")

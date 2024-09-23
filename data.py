@@ -735,20 +735,20 @@ def get_protein_dataloaders(cfg):
     batch_size = cfg.train.batch_size
 
     tokenizer = Tokenizer()
-    train_dataset = UniRefDataset('data/uniref50/', 'train', structure=False, max_len=1024)
-    test_dataset = UniRefDataset('data/uniref50/', 'test', structure=False, max_len=1024)
+    train_dataset = UniRefDataset('/vast/aa11803/uniref50_data/', 'train', structure=False, max_len=1024)
+    test_dataset = UniRefDataset('/vast/aa11803/uniref50_data/', 'test', structure=False, max_len=1024)
     
     def collate_fn(batch):
-        tokenized = [torch.tensor(tokenizer.tokenize(s)) for s in sequences]
-        tokenized = _pad(tokenized, self.tokenizer.pad_id)
-        masks = tokenized != self.tokenizer.pad_id
-        return tokenized.to(torch.long), masks
+        tokenized = [torch.tensor(tokenizer.tokenize(s)) for s in batch]
+        tokenized = _pad(tokenized, tokenizer.pad_id)
+        masks = tokenized != tokenizer.pad_id
+        return tokenized.long(), masks.float()
     
     num_workers = 16//torch.cuda.device_count()
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, collate_fn=collate_fn)
 
-    return None, None #train_dataloader, test_dataloader
+    return train_dataloader, test_dataloader
 
 def get_dataloaders(cfg):
     if cfg.data.data in image_data_name_dict:
