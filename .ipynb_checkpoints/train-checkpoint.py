@@ -12,6 +12,7 @@ from omegaconf import OmegaConf
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.strategies import DDPStrategy
+from pytorch_lightning.callbacks import ModelCheckpoint
 
 from evodiff.utils import Tokenizer
 
@@ -84,7 +85,7 @@ def train(cfg: DictConfig) -> None:
 
     # ddp = not cfg.model.model == "ScheduleConditionSparseK"
     if cfg.data.data == 'uniref50':
-        val_check_interval = 10 * (210000//cfg.train.batch_size)
+        val_check_interval = 5 * (210000//cfg.train.batch_size)
     else:
         val_check_interval = 1.0
     trainer = Trainer(
@@ -94,7 +95,9 @@ def train(cfg: DictConfig) -> None:
         logger=wandb_logger, 
         # strategy="ddp",# if ddp else 'auto'
         strategy=DDPStrategy(broadcast_buffers=False),
-        callbacks=[EMA(0.9999)],
+        callbacks=[EMA(0.9999),
+                   ModelCheckpoint(dirpath=f'checkpoints/{wandb.run.name}',
+                                   save_on_train_epoch_end=False)],
         val_check_interval=val_check_interval,
         accumulate_grad_batches=cfg.train.accumulate
     )
