@@ -10,7 +10,7 @@ model:
     schedule_type: mutual_information
     forward_kwargs:
         type: gaussian
-        normalized: false
+        normalize: false
         bandwidth: 0.14
     hybrid_loss_coeff: 0.0
     logistic_pars: true

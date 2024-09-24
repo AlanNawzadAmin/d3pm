@@ -62,7 +62,8 @@ def get_inf_gen(forward_kwargs, num_classes):
         cond_liks = cond_liks ** forward_kwargs['beta']
         cond_liks = cond_liks / cond_liks.sum(-1)[:, None]
         L = torch.tensor(cond_liks - np.eye(len(cond_liks))).float()
-    if "normalize" in forward_kwargs.keys() and forward_kwargs['normalize']:
+    if (("normalize" in forward_kwargs.keys() and forward_kwargs['normalize'])
+        or ("normalized" in forward_kwargs.keys() and forward_kwargs['normalized'])):
         L = L / (- L.diagonal()[:, None])
         range_ = torch.arange(num_classes)
         L.diagonal().fill_(0)
@@ -145,4 +146,20 @@ def _pad(tokenized, value, dim=2):
     else:
         print("padding not supported for dim > 3")
     return output
+
+def sample_index_S(S):
+    # Flatten the array
+    S_flat = S.flatten()
+    
+    # Ensure all values are non-negative
+    if torch.any(S_flat < 0):
+        raise ValueError("All entries in S must be non-negative for probability sampling")
+    
+    # Sample an index
+    sampled_flat_index = torch.multinomial(S_flat, num_samples=1)
+    
+    # Convert the flat index back to multidimensional index
+    sampled_index = np.unravel_index(sampled_flat_index.item(), S.shape)
+    
+    return sampled_index
 
