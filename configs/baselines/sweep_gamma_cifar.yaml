@@ -8,10 +8,6 @@ metric:
   goal: minimize
   name: val_l01
 parameters:
-  architecture.nn_params.film:
-    value: true
-  architecture.nn_params.semb_style:
-    value: u_inject
   architecture.nn_params.time_embed_dim:
     value: 512
   data.N:
@@ -28,6 +24,4 @@ parameters:
   model.seed:
     values:
     - 0
-    - 1
-    - 2
 program: train.py

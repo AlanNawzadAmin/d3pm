@@ -10,7 +10,7 @@ metric:
   goal: minimize
 parameters:
   model.seed:
-    values: [0, 1, 2]
+    values: [0]
   data.data:
     values: [CIFAR10]
   data.N:
@@ -18,10 +18,6 @@ parameters:
   model.forward_kwargs.type:
       value: gaussian
   model.forward_kwargs.normalized:
-      values: [true, false]
+      value: false
   model.forward_kwargs.bandwidth:
-      values: [0.01, 0.02, 0.03]
-  architecture.nn_params.semb_style:
-    value: u_inject
-  architecture.nn_params.film:
-    value: true
+      values: [0.05, 0.01, 0.02, 0.03]

@@ -33,7 +33,7 @@ import os
 import certifi
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
-@hydra.main(version_base=None, config_path="configs", config_name="basic_language")
+@hydra.main(version_base=None, config_path="configs", config_name="basic")
 def train(cfg: DictConfig) -> None:
     wandb_key = "9e61d229e6b9dbfef3e2199c7e093a75bfe53135" if 'nvg' \
         in getpass.getuser() else "6a47f093d2a55e4f4e85b33767423f2db66355b8"
@@ -95,9 +95,9 @@ def train(cfg: DictConfig) -> None:
         logger=wandb_logger, 
         # strategy="ddp",# if ddp else 'auto'
         strategy=DDPStrategy(broadcast_buffers=False),
-        callbacks=[EMA(0.9999),
-                   ModelCheckpoint(dirpath=f'checkpoints/{wandb.run.name}',
-                                   save_on_train_epoch_end=False)],
+        callbacks=([EMA(0.9999)] * cfg.train.ema
+                   +[ModelCheckpoint(dirpath=f'checkpoints/{wandb.run.name}',
+                                   save_on_train_epoch_end=False)]),
         val_check_interval=val_check_interval,
         accumulate_grad_batches=cfg.train.accumulate
     )
