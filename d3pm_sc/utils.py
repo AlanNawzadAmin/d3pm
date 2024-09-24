@@ -146,3 +146,19 @@ def _pad(tokenized, value, dim=2):
         print("padding not supported for dim > 3")
     return output
 
+def sample_index_S(S):
+    # Flatten the array
+    S_flat = S.flatten()
+    
+    # Ensure all values are non-negative
+    if torch.any(S_flat < 0):
+        raise ValueError("All entries in S must be non-negative for probability sampling")
+    
+    # Sample an index
+    sampled_flat_index = torch.multinomial(S_flat, num_samples=1)
+    
+    # Convert the flat index back to multidimensional index
+    sampled_index = np.unravel_index(sampled_flat_index.item(), S.shape)
+    
+    return sampled_index
+

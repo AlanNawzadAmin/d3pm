@@ -5,7 +5,7 @@ from torch.autograd import Function
 from tqdm import tqdm
 import time
 
-from .utils import kls, get_sort_S, get_counts_S_flat
+from .utils import kls, get_sort_S, get_counts_S_flat, sample_index_S
 from .schedule_sample import sample_n_transitions_cont
 from .continuous_time_diffusion import ContinuousTimeDiffusion
 
@@ -163,8 +163,21 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
             # S=1
             active = start_indices[0]
             if freq_order:
-                x_grad[eff_num_classes:, :active] = (1-self.up) * stat @ submat[:, active]
+                x_grad[eff_num_classes:, :active] = (1-self.up) * stat @ submat[:, :active]
             submat[:, :active] = K_operator_vec(K, submat[:, :active], stat)
+            return x_grad
+        def K_power_loop_naive(x_grad, K, S, stat,
+                         eff_num_classes:int, freq_order:bool, up:float):
+            submat = x_grad[:eff_num_classes, :]
+            # S>1
+            for i in range(1, S.max())[::-1]:
+                active = S >= i
+                submat[:, active] = K_operator_vec(K, submat[:, active].contiguous(), stat)
+            # S=1
+            active = S >= 0
+            if freq_order:
+                x_grad[eff_num_classes:, active] = (1-self.up) * stat @ submat[:, active]
+            submat[:, active] = K_operator_vec(K, submat[:, active], stat)
             return x_grad
 
         self.K_T_operator = K_T_operator
@@ -172,6 +185,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         self.K_operator = K_operator
         self.K_T_power_loop = K_T_power_loop
         self.K_power_loop = K_power_loop
+        self.K_power_loop_naive = K_power_loop_naive
         self.second_eval = self.up
         self.calc_stationary()
 
@@ -249,15 +263,22 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         x_t_sample_sort = torch.argmax(x_t_probs/inv_gumbel_noise, dim=-1)
         return x_t_sample_sort
 
-    def q_posterior_logits(self, x_0_sort, x_t_sort, t, S_sort, use_cached_fact2=False, log_fact1=None):
+    def q_posterior_logits(self, x_0_sort, x_t_sort, t, S_sort, use_cached_fact2=False, log_fact1=None, k=1):
         if use_cached_fact2:
             fact2 = self.cache_sm1_power
             # print("cache check:", ((fact2 - self.K_T_power_mult(S_sort-1, softmaxed.float()))**2).sum())
         else:
             softmaxed = convert_to_norm_distribution(x_0_sort, self.num_classes, self.eps)
-            fact2 = self.K_T_power_mult(S_sort-1, softmaxed.float())
+            fact2 = self.K_T_power_mult(S_sort-k, softmaxed.float())
         if log_fact1 is None:
-            log_fact1 = torch.log(self.K_operator(x_t_sort) + self.eps)
+            if (isinstance(k, (int, float)) and k == 1):
+                log_fact1 = torch.log(self.K_operator(x_t_sort) + self.eps)
+            else:
+                softmax_t = convert_to_norm_distribution(x_t_sort, self.num_classes, self.eps)
+                x_grad = softmax_t.reshape(-1, softmax_t.shape[-1]).T
+                K_k_x_t = self.K_power_loop_naive(x_grad, self.K, k.flatten(), self.stat,
+                                         self.eff_num_classes, self.freq_order, self.up)
+                log_fact1 = torch.log(K_k_x_t.T.reshape(softmax_t.shape) + self.eps)
         out = torch.log(fact2 + self.eps) + log_fact1
         return out
 
@@ -295,44 +316,45 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
             "ce_loss": ce_loss.detach().item(),
         }
 
-    def sample_with_image_sequence(self, *args, **kwargs):
+    def sample_sequence(self, x, cond=None, attn_mask=None, n_T=200, stride=10):
         return None
+        # t = self.t_max * torch.ones(x.shape[0], device=x.device)
+        # S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
+        # t = t * 0
+        # S = S.swapaxes(0, 1).reshape(*x.shape).long()
+        # steps = 0
+        # images = []
+        # n_steps = torch.tensor([S[b].sum() for b in range(len(S))]).max().item()
+        # if n_steps > 1e6:
+        #     return None
+        # pbar = tqdm(total=n_steps, unit="iteration",
+        #             position=0, leave=True)
+        # trans_step = n_steps // n_T
+        # while S.sum() > 0:
+        #     k = torch.zeros_like(S)
+        #     S_temp = S.clone()
+        #     for b in range(len(x)):
+        #         for i in range(trans_step):
+        #             if S_temp[b].sum()>0:
+        #                 ind = sample_index_S(S_temp[b] / S_temp[b].sum())
+        #                 k[b][ind] += 1
+        #                 S_temp[b][ind] -= 1
 
-    # def sample_with_text_sequence(self, x, cond=None, n_T=200, stride=10):
-    #     print(1)
-    #     t = self.t_max * torch.ones(x.shape[0], device=x.device)
-    #     S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
-    #     S = S.swapaxes(0, 1).reshape(*x.shape).long()
-    #     steps = 0
-    #     images = []
-    #     n_steps = S.sum(-1).sum(-1).sum(-1).max().item()
-    #     if n_steps > 1e6:
-    #         print("n_steps:", n_steps)
-    #         return None
-    #     pbar = tqdm(total=n_steps, unit="iteration",
-    #                 position=0, leave=True)
-    #     trans_step = n_steps // n_T
-    #     while S.sum() > 0:
-    #         # predict what comes next
-    #         x_next = self.p_sample(
-    #             x, t, cond, torch.rand((*x.shape, self.num_classes), device=x.device), S
-    #         )
-    #         for b in range(len(x)):
-    #             trans_indices = torch.argwhere(S[b] > 0)
-    #             trans_indices = trans_indices[torch.randperm(len(trans_indices))]
-    #             if len(trans_indices) > 0:
-    #                 # randomly transiiton
-    #                 for k in trans_indices[:trans_step]:
-    #                     x[b, k] = x_next[b, k]
-    #                     S[b, k] -= 1
-    #         pbar.update(trans_step)
-    #         steps += 1
-    #         if steps % stride == 0:
-    #             images.append(torch.clone(x))
-    #     pbar.close()
-    #     # if last step is not divisible by stride, we add the last image.
-    #     if steps % stride != 0:
-    #         images.append(x)
+        #     # predict what comes next
+        #     x = self.p_sample(
+        #         x, t, cond, attn_mask, torch.rand((*x.shape, self.num_classes), device=x.device), S, k=k,
+        #     )
+        #     assert torch.all(S_temp <= S)
+        #     S = S_temp
+        #     pbar.update(trans_step)
+        #     steps += 1
+        #     if steps % stride == 0:
+        #         images.append(torch.clone(x))
+        # pbar.close()
+        # # if last step is not divisible by stride, we add the last image.
+        # if steps % stride != 0:
+        #     images.append(x)
 
-    #     return images
+        # return images
+
 

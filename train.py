@@ -66,6 +66,7 @@ def train(cfg: DictConfig) -> None:
         sedd_param=cfg.model.sedd_param,
         eff_num_classes=cfg.model.eff_num_classes,
         input_logits=cfg.model.input_logits,
+        tokenizer=tokenizer,
         **OmegaConf.to_container(cfg.train, resolve=True),
     )
 

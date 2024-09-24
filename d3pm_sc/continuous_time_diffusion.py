@@ -88,15 +88,14 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
         )
         return t, S, x_t
 
-    def p_sample(self, x, t, cond, noise, S=None):
+    def p_sample(self, x, t, cond, attn_mask, noise, S=None, k=1):
         # predict prev(x_t) or x_{t-1}
-        predicted_x0_logits = self.model_predict(x, t, cond, S)
-        pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x, t, S)
+        predicted_x0_logits = self.model_predict(x, t, cond if cond is not None else attn_mask, S)
+        pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x, t, S, k=k)
         # sample
         noise = torch.clip(noise, self.eps, 1.0)
-        not_first_step = (t != 0).float().reshape((x.shape[0], *[1] * (x.dim())))
         gumbel_noise = -torch.log(-torch.log(noise))
         sample = torch.argmax(
-            pred_q_posterior_logits + gumbel_noise * not_first_step, dim=-1
+            pred_q_posterior_logits + gumbel_noise, dim=-1
         )
         return sample

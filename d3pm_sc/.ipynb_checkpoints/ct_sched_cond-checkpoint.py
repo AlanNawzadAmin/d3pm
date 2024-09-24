@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-from .utils import kls, convert_to_distribution, get_inf_gen
+from .utils import kls, convert_to_distribution, get_inf_gen, sample_index_S
 from .schedule_sample import sample_n_transitions_cont
 from .continuous_time_diffusion import ContinuousTimeDiffusion
 
@@ -83,20 +83,17 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         gumbel_noise = -torch.log(-torch.log(noise))
         return torch.argmax(logits + gumbel_noise, dim=-1)
 
-    def q_posterior_logits(self, x_0, x_t, t, S):
+    def q_posterior_logits(self, x_0, x_t, t, S, k=1):
+        """ probs for x_{t-k}|x_t, x_0 """
         x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
-        fact1 = self.K.T[x_t, :] # x_t | x_{t-1}
-        trans_mats = self.K_powers[S - 1, :, :] # make sure we ignore S=0 later!
+        fact1 = self.K_powers.swapaxes(1, 2)[k, x_t, :] # x_t | x_{t-1}
+        trans_mats = self.K_powers[S - k, :, :] # make sure we ignore S=0 later!
         if self.fix_x_t_bias:
             x_0_logits -= torch.log(self.K_powers[S, :, x_t] + self.eps) # x_{t} | x_{0}
         softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
         fact2 = torch.einsum("b...c,b...cd->b...d", softmaxed, trans_mats) # x_{t-1} | x_{0}
         out = torch.log(fact1 + self.eps) + torch.log(fact2 + self.eps)
-        
-        # check if t==0; then we calculate the distance to x_0
-        t_broadcast = t.reshape((t.shape[0], *[1] * (x_t.dim())))
-        bc = torch.where(t_broadcast == 0, x_0_logits, out)
-        return bc
+        return out
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask=None,) -> torch.Tensor:
         t, S, x_t = self.sample_point(x)
@@ -121,37 +118,44 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         ce_loss = torch.nn.CrossEntropyLoss(reduction='none')(predicted_x0_logits, x)
         if attn_mask is not None:
             ce_loss = (ce_loss * attn_mask.flatten()).sum() / attn_mask.sum()
+        else:
+            ce_loss = ce_loss.mean()
 
         return self.hybrid_loss_coeff * ce_loss + vb_loss, {
             "vb_loss": vb_loss.detach().item(),
             "ce_loss": ce_loss.detach().item(),
         }
 
-    def sample_with_image_sequence(self, x, cond=None, n_T=200, stride=10):
+    
+    def sample_sequence(self, x, cond=None, attn_mask=None, n_T=200, stride=10):
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
         S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
+        t = t * 0
         S = S.swapaxes(0, 1).reshape(*x.shape).long()
         steps = 0
         images = []
-        n_steps = S.sum(-1).sum(-1).sum(-1).max().item()
-        if n_steps > 1e6 or x.dim() < 4:
+        n_steps = torch.tensor([S[b].sum() for b in range(len(S))]).max().item()
+        if n_steps > 1e6:
             return None
         pbar = tqdm(total=n_steps, unit="iteration",
                     position=0, leave=True)
         trans_step = n_steps // n_T
         while S.sum() > 0:
-            # predict what comes next
-            x_next = self.p_sample(
-                x, t, cond, torch.rand((*x.shape, self.num_classes), device=x.device), S
-            )
+            k = torch.zeros_like(S)
+            S_temp = S.clone()
             for b in range(len(x)):
-                trans_indices = torch.argwhere(S[b] > 0)
-                trans_indices = trans_indices[torch.randperm(len(trans_indices))]
-                if len(trans_indices) > 0:
-                    # randomly transiiton
-                    for i, j, k in trans_indices[:trans_step]:
-                        x[b, i, j, k] = x_next[b, i, j, k]
-                        S[b, i, j, k] -= 1
+                for i in range(trans_step):
+                    if S_temp[b].sum()>0:
+                        ind = sample_index_S(S_temp[b] / S_temp[b].sum())
+                        k[b][ind] += 1
+                        S_temp[b][ind] -= 1
+
+            # predict what comes next
+            x = self.p_sample(
+                x, t, cond, attn_mask, torch.rand((*x.shape, self.num_classes), device=x.device), S, k=k,
+            )
+            assert torch.all(S_temp <= S)
+            S = S_temp
             pbar.update(trans_step)
             steps += 1
             if steps % stride == 0:

@@ -10,15 +10,18 @@ from torchvision.utils import make_grid
 import torch.nn.functional as F
 from tqdm import tqdm
 
-def get_gif(sample_x, model, gen_trans_step, batch_size):
+def get_gif(sample_x, sample_a, model, gen_trans_step, batch_size):
     # save images
-    cond = torch.arange(0, batch_size).to(sample_x.device) % 10
+    cond = None#torch.arange(0, batch_size).to(sample_x.device) % 10
     p = model.get_stationary()
     samples = torch.multinomial(p, num_samples=batch_size*sample_x.shape[1:].numel(), replacement=True)
     init_noise = samples.reshape((batch_size,)+sample_x.shape[1:]).to(sample_x.device)
-
-    images = model.sample_with_image_sequence(
-        init_noise, cond, stride=3, n_T=gen_trans_step,
+    if sample_a is not None:
+        attn_mask = sample_a.repeat(batch_size, *[1]*(sample_a.dim()-1))
+    else:
+        attn_mask = None
+    images = model.sample_sequence(
+        init_noise, cond, attn_mask, stride=3, n_T=gen_trans_step,
     )
     if images is not None:
         # image sequences to gif
@@ -44,12 +47,33 @@ def get_gif(sample_x, model, gen_trans_step, batch_size):
         return temp_file.name, temp_file_img.name
     else: 
         return None, None
+
+def get_text(sample_x, sample_a, model, gen_trans_step, batch_size, tokenizer):
+    # save images
+    cond = None
+    p = model.get_stationary()
+    samples = torch.multinomial(p, num_samples=batch_size*sample_x.shape[1:].numel(), replacement=True)
+    init_noise = samples.reshape((batch_size,)+sample_x.shape[1:]).to(sample_x.device)
+    if sample_a is not None:
+        attn_mask = sample_a.repeat(batch_size, *[1]*(sample_a.dim()-1))
+    else:
+        attn_mask = None
+    tokens = model.sample_sequence(
+        init_noise, cond, attn_mask, stride=3, n_T=gen_trans_step,
+    )[-1]
+    if sample_a is not None:
+        tokens[attn_mask == 0.] = tokenizer.pad_id
+    if hasattr(tokenizer, 'decode'):
+        return tokenizer.decode(tokens)
+    elif hasattr(tokenizer, 'untokenize'):
+        return [tokenizer.untokenize(t)[:int(a.sum())]
+                for t, a in zip(tokens,attn_mask)]
     
 
 class DiffusionTrainer(pl.LightningModule):
-    def __init__(self, lr=1e-3, gen_trans_step=200, n_gen_images=4, grad_clip_val=1, weight_decay=0, seed=0, n_stat_samples=2e6, **kwargs):
+    def __init__(self, lr=1e-3, gen_trans_step=1000, n_gen_images=4, grad_clip_val=1, weight_decay=0, seed=0, n_stat_samples=2e6, tokenizer=None, **kwargs):
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=['tokenizer'])
         self.lr = lr
         self.grad_clip_val = grad_clip_val
         self.weight_decay = weight_decay
@@ -59,6 +83,7 @@ class DiffusionTrainer(pl.LightningModule):
         self.gen_trans_step = gen_trans_step
         self.n_gen_images = n_gen_images
         self.n_stat_samples = n_stat_samples
+        self.tokenizer= tokenizer
 
     def forward(self, x):
         return NotImplementedError
@@ -91,6 +116,7 @@ class DiffusionTrainer(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         if isinstance(batch, tuple): #image datasets
             x, cond = batch
+            attn_mask = None
             if cond is not None:
                 if cond.dim() == x.dim(): #protein datasets
                     attn_mask = cond
@@ -102,6 +128,8 @@ class DiffusionTrainer(pl.LightningModule):
         loss, info = self(x, cond, attn_mask)
         if self.sample_x is None:
             self.sample_x = x[:1]
+            self.sample_a = None if attn_mask is None else attn_mask[:1]
+                
         self.log('train_loss', info['vb_loss'], sync_dist=True)
         self.log('train_ce_loss', info['ce_loss'], sync_dist=True)
         # with torch.no_grad():
@@ -137,11 +165,20 @@ class DiffusionTrainer(pl.LightningModule):
         # generate image
         if self.sample_x is not None:
             with torch.no_grad():
-                gif_fname, img_fname = get_gif(self.sample_x, self, self.gen_trans_step, self.n_gen_images)
-            if gif_fname is not None:
-                if isinstance(self.logger, pl.loggers.WandbLogger):
-                    wandb.log({"sample_gif": wandb.Image(gif_fname)})
-                    wandb.log({"sample_gif_last": wandb.Image(img_fname)})
+                if self.tokenizer is None:
+                    gif_fname, img_fname = get_gif(self.sample_x, self.sample_a, self, self.gen_trans_step, self.n_gen_images)
+                    if gif_fname is not None:
+                        if isinstance(self.logger, pl.loggers.WandbLogger):
+                            wandb.log({"sample_gif": wandb.Image(gif_fname)})
+                            wandb.log({"sample_gif_last": wandb.Image(img_fname)})
+                else:
+                    print("getting text")
+                    text = get_text(self.sample_x, self.sample_a, self, self.gen_trans_step, self.n_gen_images, self.tokenizer)
+                    print(text)
+                    if text is not None:
+                        if isinstance(self.logger, pl.loggers.WandbLogger):
+                            joined_text = "\n".join(text)  # Join list items with newlines
+                            wandb.log({"sample_text": wandb.Table(columns=["text"], data=[[joined_text]])})
 
     def on_fit_start(self):
         if isinstance(self.logger, pl.loggers.WandbLogger):
