@@ -135,8 +135,6 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         steps = 0
         images = []
         n_steps = torch.tensor([S[b].sum() for b in range(len(S))]).max().item()
-        if n_steps > 1e6:
-            return None
         pbar = tqdm(total=n_steps, unit="iteration",
                     position=0, leave=True)
         trans_step = n_steps // n_T
