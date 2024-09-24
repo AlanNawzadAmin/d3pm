@@ -22,6 +22,7 @@ from d3pm_sc.discrete_sc import DiscreteScheduleCondition
 
 from nets import get_model_setup
 from data import get_dataloaders
+from ema import EMA
 
 import getpass
 
@@ -93,6 +94,7 @@ def train(cfg: DictConfig) -> None:
         logger=wandb_logger, 
         # strategy="ddp",# if ddp else 'auto'
         strategy=DDPStrategy(broadcast_buffers=False),
+        callbacks=[EMA(0.9999)],
         limit_val_batches=limit_val_batches,
         val_check_interval=val_check_interval,
     )
