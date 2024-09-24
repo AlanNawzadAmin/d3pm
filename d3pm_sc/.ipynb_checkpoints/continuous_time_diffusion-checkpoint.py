@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 from .trainer import DiffusionTrainer
+import pytorch_lightning as pl
 
 from .schedule_sample import sample_n_transitions, sample_full_transitions
 from .schedule_sample import sample_n_transitions_cont
@@ -99,3 +100,32 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
             pred_q_posterior_logits + gumbel_noise, dim=-1
         )
         return sample
+
+    @classmethod
+    def load_from_checkpoint(cls, checkpoint_path, map_location=None, **kwargs):
+        print("Loading checkpoint ...")
+        checkpoint = torch.load(checkpoint_path, map_location=map_location)
+        hparams = checkpoint['hyper_parameters']
+        
+        # Get the x0_model_class
+        from d3pm_sc.unet import UNet, KingmaUNet, SimpleUNet, GigaUNet
+        from d3pm_sc.dit_vision import DiT_Llama
+        from d3pm_sc.dit_text import DIT
+        from d3pm_sc.protein_convnet import ByteNetLMTime
+        x0_model_class = {
+            "SimpleUNet":SimpleUNet,
+            "KingmaUNet":KingmaUNet,
+            "UNet":UNet,
+            "GigaUNet":GigaUNet,
+            "DiT_Llama":DiT_Llama,
+            "DIT": DIT,
+            "ByteNetLMTime": ByteNetLMTime
+        }[hparams['x0_model_class']]
+        hparams['x0_model_class'] = x0_model_class
+
+        # Create model
+        print("Setting up class ...")
+        model = cls(**hparams)
+        print("Loading params ...")
+        model.load_state_dict(checkpoint['state_dict'])
+        return model
