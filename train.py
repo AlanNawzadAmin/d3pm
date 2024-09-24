@@ -13,6 +13,8 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.strategies import DDPStrategy
 
+from evodiff.utils import Tokenizer
+
 from d3pm_sc.ct_sched_cond import ScheduleCondition
 from d3pm_sc.ct_sched_cond_sparse_k import ScheduleConditionSparseK
 from d3pm_sc.masking_diffusion import MaskingDiffusion
@@ -67,7 +69,7 @@ def train(cfg: DictConfig) -> None:
         sedd_param=cfg.model.sedd_param,
         eff_num_classes=cfg.model.eff_num_classes,
         input_logits=cfg.model.input_logits,
-        tokenizer=tokenizer,
+        tokenizer=tokenizer if cfg.data.data != 'uniref50' else Tokenizer(),
         **OmegaConf.to_container(cfg.train, resolve=True),
     )
 

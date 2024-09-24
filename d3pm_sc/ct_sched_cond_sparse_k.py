@@ -32,7 +32,6 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         hybrid_loss_coeff=0.01,
         sedd_param=True,
         eff_num_classes=1000000,
-        tokenizer='bert-base-uncased',
         **kwargs
     ):
         # Precalculate betas, define model_predict, p_sample
@@ -247,7 +246,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         S = S.swapaxes(0, 1).reshape(*x.shape).long()
         softmaxed = convert_to_norm_distribution(x, self.num_classes, self.eps)
         x_1 = self.K_T_power_mult(S, softmaxed)
-        kl = kls(x_1[..., :self.eff_num_classes], self.get_stationary(), self.eps)
+        kl = kls(torch.log(self.get_stationary() + self.eps), x_1[..., :self.eff_num_classes], self.eps)
         return kl.mean()
 
     def x_t_sample(self, x_0, t, noise, S):
@@ -263,20 +262,23 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         x_t_sample_sort = torch.argmax(x_t_probs/inv_gumbel_noise, dim=-1)
         return x_t_sample_sort
 
-    def q_posterior_logits(self, x_0_sort, x_t_sort, t, S_sort, use_cached_fact2=False, log_fact1=None, k=1):
+    def q_posterior_logits(self, x_0_sort, x_t_sort, t, S_sort, use_cached_fact2=False, log_fact1=None, k_sort=1):
         if use_cached_fact2:
             fact2 = self.cache_sm1_power
             # print("cache check:", ((fact2 - self.K_T_power_mult(S_sort-1, softmaxed.float()))**2).sum())
         else:
             softmaxed = convert_to_norm_distribution(x_0_sort, self.num_classes, self.eps)
-            fact2 = self.K_T_power_mult(S_sort-k, softmaxed.float())
+            if torch.all((S_sort-k_sort) == 0):
+                fact2 = softmaxed
+            else:
+                fact2 = self.K_T_power_mult(S_sort-k_sort, softmaxed.float())
         if log_fact1 is None:
-            if (isinstance(k, (int, float)) and k == 1):
+            if (isinstance(k_sort, (int, float)) and k_sort == 1):
                 log_fact1 = torch.log(self.K_operator(x_t_sort) + self.eps)
             else:
                 softmax_t = convert_to_norm_distribution(x_t_sort, self.num_classes, self.eps)
                 x_grad = softmax_t.reshape(-1, softmax_t.shape[-1]).T
-                K_k_x_t = self.K_power_loop_naive(x_grad, self.K, k.flatten(), self.stat,
+                K_k_x_t = self.K_power_loop_naive(x_grad, self.K, k_sort, self.stat,
                                          self.eff_num_classes, self.freq_order, self.up)
                 log_fact1 = torch.log(K_k_x_t.T.reshape(softmax_t.shape) + self.eps)
         out = torch.log(fact2 + self.eps) + log_fact1
@@ -316,45 +318,62 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
             "ce_loss": ce_loss.detach().item(),
         }
 
+    def p_sample(self, x, t, cond, attn_mask, noise, S=None, k=1):
+            # predict prev(x_t) or x_{t-1}
+            predicted_x0_logits = self.model_predict(x, t, cond if cond is not None else attn_mask, S)
+            Smk_sort, sort, unsort = get_sort_S(S-k)
+            x_sort = x.flatten()[sort]
+            S_sort = S.flatten()[sort]
+            k_sort = k.flatten()[sort]
+            predicted_x0_logits_sort = predicted_x0_logits.reshape(-1, self.num_classes)[sort]
+            pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits_sort, x_sort, t, S_sort, k_sort=k_sort).reshape(*x.shape, self.num_classes)
+            # sample
+            noise = torch.clip(noise, self.eps, 1.0)
+            gumbel_noise = -torch.log(-torch.log(noise))
+            sample = torch.argmax(
+                pred_q_posterior_logits + gumbel_noise, dim=-1
+            )
+            return sample
+        
     def sample_sequence(self, x, cond=None, attn_mask=None, n_T=200, stride=10):
-        return None
-        # t = self.t_max * torch.ones(x.shape[0], device=x.device)
-        # S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
-        # t = t * 0
-        # S = S.swapaxes(0, 1).reshape(*x.shape).long()
-        # steps = 0
-        # images = []
-        # n_steps = torch.tensor([S[b].sum() for b in range(len(S))]).max().item()
-        # if n_steps > 1e6:
-        #     return None
-        # pbar = tqdm(total=n_steps, unit="iteration",
-        #             position=0, leave=True)
-        # trans_step = n_steps // n_T
-        # while S.sum() > 0:
-        #     k = torch.zeros_like(S)
-        #     S_temp = S.clone()
-        #     for b in range(len(x)):
-        #         for i in range(trans_step):
-        #             if S_temp[b].sum()>0:
-        #                 ind = sample_index_S(S_temp[b] / S_temp[b].sum())
-        #                 k[b][ind] += 1
-        #                 S_temp[b][ind] -= 1
+        # identical to sched cond
+        t = self.t_max * torch.ones(x.shape[0], device=x.device)
+        S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
+        t = t * 0
+        S = S.swapaxes(0, 1).reshape(*x.shape).long()
+        steps = 0
+        images = []
+        n_steps = torch.tensor([S[b].sum() for b in range(len(S))]).max().item()
+        if n_steps > 1e6:
+            return None
+        pbar = tqdm(total=n_steps, unit="iteration",
+                    position=0, leave=True)
+        trans_step = n_steps // n_T
+        while S.sum() > 0:
+            k = torch.zeros_like(S)
+            S_temp = S.clone()
+            for b in range(len(x)):
+                for i in range(trans_step):
+                    if S_temp[b].sum()>0:
+                        ind = sample_index_S(S_temp[b] / S_temp[b].sum())
+                        k[b][ind] += 1
+                        S_temp[b][ind] -= 1
 
-        #     # predict what comes next
-        #     x = self.p_sample(
-        #         x, t, cond, attn_mask, torch.rand((*x.shape, self.num_classes), device=x.device), S, k=k,
-        #     )
-        #     assert torch.all(S_temp <= S)
-        #     S = S_temp
-        #     pbar.update(trans_step)
-        #     steps += 1
-        #     if steps % stride == 0:
-        #         images.append(torch.clone(x))
-        # pbar.close()
-        # # if last step is not divisible by stride, we add the last image.
-        # if steps % stride != 0:
-        #     images.append(x)
+            # predict what comes next
+            x = self.p_sample(
+                x, t, cond, attn_mask, torch.rand((*x.shape, self.num_classes), device=x.device), S, k=k,
+            )
+            assert torch.all(S_temp <= S)
+            S = S_temp
+            pbar.update(trans_step)
+            steps += 1
+            if steps % stride == 0:
+                images.append(torch.clone(x))
+        pbar.close()
+        # if last step is not divisible by stride, we add the last image.
+        if steps % stride != 0:
+            images.append(x)
 
-        # return images
+        return images
 
 

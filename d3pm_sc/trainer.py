@@ -60,15 +60,26 @@ def get_text(sample_x, sample_a, model, gen_trans_step, batch_size, tokenizer):
         attn_mask = None
     tokens = model.sample_sequence(
         init_noise, cond, attn_mask, stride=3, n_T=gen_trans_step,
-    )[-1]
+    )
+    last_token = tokens[-1]
+    stride_tokens = tokens[::(gen_trans_step // 3)//10]
+    print("N stride tokens", len(stride_tokens))
+    print("N total tokens", len(tokens))
     if tokens is not None:
         if sample_a is not None:
-            tokens[attn_mask == 0.] = tokenizer.pad_id
+            if hasattr(tokenizer, 'pad_id'):
+                pad_id = tokenizer.pad_id
+            elif hasattr(tokenizer, 'pad_token_id'):
+                pad_id = tokenizer.pad_token_id
+            last_token[attn_mask == 0.] = pad_id
+            for t in stride_tokens:
+                t[attn_mask == 0.] = pad_id
         if hasattr(tokenizer, 'decode'):
-            return tokenizer.decode(tokens)
+            dt = lambda tok: [tokenizer.decode(t) for t in tok]
         elif hasattr(tokenizer, 'untokenize'):
-            return [tokenizer.untokenize(t)[:int(a.sum())]
-                    for t, a in zip(tokens,attn_mask)]
+            dt = lambda tok: [tokenizer.untokenize(t)[:int(a.sum())]
+                              for t, a in zip(tok,attn_mask)]
+        return dt(last_token), [dt(t) for t in stride_tokens]
     else:
         return None
 
@@ -85,7 +96,7 @@ class DiffusionTrainer(pl.LightningModule):
         self.gen_trans_step = gen_trans_step
         self.n_gen_images = n_gen_images
         self.n_stat_samples = n_stat_samples
-        self.tokenizer= tokenizer
+        self.tokenizer = tokenizer
 
     def forward(self, x):
         return NotImplementedError
@@ -175,11 +186,13 @@ class DiffusionTrainer(pl.LightningModule):
                             wandb.log({"sample_gif_last": wandb.Image(img_fname)})
                 else:
                     print("getting text")
-                    text = get_text(self.sample_x, self.sample_a, self, self.gen_trans_step, self.n_gen_images, self.tokenizer)
-                    if text is not None:
+                    last_text, gen_text = get_text(self.sample_x, self.sample_a, self, self.gen_trans_step, self.n_gen_images, self.tokenizer)
+                    if last_text is not None:
                         if isinstance(self.logger, pl.loggers.WandbLogger):
-                            joined_text = "\n".join(text)
+                            joined_text = "\n\n".join(last_text)
                             wandb.log({"sample_text": wandb.Table(columns=["text"], data=[[joined_text]])})
+                            joined_text_gen = ["\n\n".join(t) for t in gen_text]
+                            wandb.log({"sample_text_process": wandb.Table(columns=["text"], data=[[jt] for jt in joined_text_gen])})
 
     def on_fit_start(self):
         if isinstance(self.logger, pl.loggers.WandbLogger):
