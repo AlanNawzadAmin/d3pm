@@ -61,9 +61,9 @@ def get_text(sample_x, sample_a, model, gen_trans_step, batch_size, tokenizer):
     tokens = model.sample_sequence(
         init_noise, cond, attn_mask, stride=3, n_T=gen_trans_step,
     )
-    last_token = tokens[-1]
-    stride_tokens = tokens[::(gen_trans_step // 3)//10]
     if tokens is not None:
+        last_token = tokens[-1]
+        stride_tokens = tokens[::(gen_trans_step // 3)//10]
         if sample_a is not None:
             if hasattr(tokenizer, 'pad_id'):
                 pad_id = tokenizer.pad_id
