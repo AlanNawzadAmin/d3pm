@@ -10,7 +10,7 @@ metric:
   goal: minimize
 parameters:
   model.seed:
-    values: [0]
+    values: [0, 1, 2]
   data.data:
     values: [CIFAR10]
   data.N:
