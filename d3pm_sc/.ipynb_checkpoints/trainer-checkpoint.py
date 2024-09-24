@@ -61,14 +61,16 @@ def get_text(sample_x, sample_a, model, gen_trans_step, batch_size, tokenizer):
     tokens = model.sample_sequence(
         init_noise, cond, attn_mask, stride=3, n_T=gen_trans_step,
     )[-1]
-    if sample_a is not None:
-        tokens[attn_mask == 0.] = tokenizer.pad_id
-    if hasattr(tokenizer, 'decode'):
-        return tokenizer.decode(tokens)
-    elif hasattr(tokenizer, 'untokenize'):
-        return [tokenizer.untokenize(t)[:int(a.sum())]
-                for t, a in zip(tokens,attn_mask)]
-    
+    if tokens is not None:
+        if sample_a is not None:
+            tokens[attn_mask == 0.] = tokenizer.pad_id
+        if hasattr(tokenizer, 'decode'):
+            return tokenizer.decode(tokens)
+        elif hasattr(tokenizer, 'untokenize'):
+            return [tokenizer.untokenize(t)[:int(a.sum())]
+                    for t, a in zip(tokens,attn_mask)]
+    else:
+        return None
 
 class DiffusionTrainer(pl.LightningModule):
     def __init__(self, lr=1e-3, gen_trans_step=1000, n_gen_images=4, grad_clip_val=1, weight_decay=0, seed=0, n_stat_samples=2e6, tokenizer=None, **kwargs):
@@ -174,10 +176,9 @@ class DiffusionTrainer(pl.LightningModule):
                 else:
                     print("getting text")
                     text = get_text(self.sample_x, self.sample_a, self, self.gen_trans_step, self.n_gen_images, self.tokenizer)
-                    print(text)
                     if text is not None:
                         if isinstance(self.logger, pl.loggers.WandbLogger):
-                            joined_text = "\n".join(text)  # Join list items with newlines
+                            joined_text = "\n".join(text)
                             wandb.log({"sample_text": wandb.Table(columns=["text"], data=[[joined_text]])})
 
     def on_fit_start(self):
