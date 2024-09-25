@@ -24,4 +24,6 @@ parameters:
   model.seed:
     values:
     - 0
+    - 1
+    - 2
 program: train.py

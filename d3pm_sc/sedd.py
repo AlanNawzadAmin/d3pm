@@ -100,9 +100,9 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
             "ce_loss": ce_loss.detach().item(),
         }
 
-    def p_sample(self, x, t, cond, noise, delta_t, S=None):
+    def p_sample(self, x, t, cond, attn_mask, noise, delta_t, S=None):
         # predict prev(x_t) or x_{t-1}
-        predicted_x0_logits = self.model_predict(x, t, cond,None)
+        predicted_x0_logits = self.model_predict(x, t, cond if cond is not None else attn_mask,None)
         bwd_inf_gen = self.r_posterior(predicted_x0_logits, x, t,None)
         x_0_logits = convert_to_distribution(x, self.num_classes, self.eps)
         softmaxed = torch.softmax(x_0_logits, dim=-1)
