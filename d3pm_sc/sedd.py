@@ -76,10 +76,10 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         ratios = ((ratios * self.L[x_t, :]).transpose(0, -1) * self.beta(t)).transpose(0, -1)
         return ratios
 
-    def forward(self, x: torch.Tensor, cond: torch.Tensor = None, *args) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask=None, *args) -> torch.Tensor:
         t, _, x_t = self.sample_point(x)
         # predict x_0 and prev(x_t)
-        predicted_x0_logits = self.model_predict(x_t, t, cond, None)
+        predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, None)
         true_r_posterior = self.r_posterior(x, x_t, t, None)
         pred_r_posterior = self.r_posterior(predicted_x0_logits, x_t, t, None)
 

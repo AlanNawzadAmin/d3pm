@@ -731,21 +731,34 @@ def get_img_dataloaders(cfg):
 from sequence_models.datasets import UniRefDataset
 from evodiff.utils import Tokenizer
 from d3pm_sc.utils import _pad 
+import numpy as np
 def get_protein_dataloaders(cfg):
     batch_size = cfg.train.batch_size
 
+    max_len = 1024
     tokenizer = Tokenizer()
-    train_dataset = UniRefDataset('/scratch/aa11803/d3pm/data/uniref_2020/uniref50/', 'train', structure=False, max_len=1024)
-    test_dataset = UniRefDataset('/scratch/aa11803/d3pm/data/uniref_2020/uniref50/', 'test', structure=False, max_len=1024)
-    
+    train_dataset = UniRefDataset('/scratch/aa11803/d3pm/data/uniref_2020/uniref50/', 'train', structure=False, max_len=max_len)
+    test_dataset = UniRefDataset('/scratch/aa11803/d3pm/data/uniref_2020/uniref50/', 'test', structure=False, max_len=max_len)
+
+    def mask_pad(tokenized):
+        masks = tokenized != tokenizer.pad_id
+        return tokenized.long(), masks.float()
     def collate_fn(batch):
         tokenized = [torch.tensor(tokenizer.tokenize(s)) for s in batch]
         tokenized = _pad(tokenized, tokenizer.pad_id)
-        masks = tokenized != tokenizer.pad_id
-        return tokenized.long(), masks.float()
+        return mask_pad(tokenized)
     
     num_workers = 16//torch.cuda.device_count()
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
+    if hasattr(cfg.train, 'pack') and cfg.train.pack:
+        block_size = 13
+        def collate_fn_pack(batch):
+            batch = np.array([string[0] + tokenizer.pad for string in batch])
+            strings = batch.reshape(-1, block_size)
+            strings = [(''.join(strs)[:max_len],) for strs in strings]
+            return collate_fn(strings)
+        train_dataloader = DataLoader(train_dataset, batch_size=batch_size* block_size, num_workers=num_workers, shuffle=True, collate_fn=collate_fn_pack)
+    else:
+        train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, collate_fn=collate_fn)
 
     return train_dataloader, test_dataloader
