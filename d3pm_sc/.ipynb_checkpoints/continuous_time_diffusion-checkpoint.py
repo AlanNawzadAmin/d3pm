@@ -54,7 +54,7 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
         raise NotImplementedError
 
     def base_predict(self, x_t, t, cond, S=None):
-        return self.x0_model(x_t, t, cond, S)
+        return self.x0_model(x_t, t, cond, S).float()
 
     def model_predict(self, x_t, t, cond, S=None):
         pred = self.base_predict(x_t, t, cond, S)

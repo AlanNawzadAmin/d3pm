@@ -59,10 +59,10 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
 
     def base_predict(self, x_t, t, cond, S=None):
         if not self.input_logits:
-            return self.x0_model(x_t, t, cond, S)
+            return self.x0_model(x_t, t, cond, S).float()
         else:
             x_0_logits = torch.log(self.K_powers[S, :, x_t] + self.eps)
-            return self.x0_model(x_0_logits, t, cond, S)
+            return self.x0_model(x_0_logits, t, cond, S).float()
 
     def get_kl_t1(self, x):
         # sample S
