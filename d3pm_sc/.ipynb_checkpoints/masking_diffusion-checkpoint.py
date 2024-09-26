@@ -47,7 +47,7 @@ class MaskingDiffusion(ScheduleCondition): #schedule conditioning is True!
         S = (S>0).long()
         
         # predict x_0 and prev(x_t)
-        predicted_x0_logits = self.model_predict(x, t, cond if cond is not None else attn_mask, S)
+        predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, S)
         true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S)
         pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x_t, t, S)
 
