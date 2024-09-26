@@ -22,7 +22,16 @@ model:
     eff_num_classes: 1000000
 
 architecture:
+    s_dim: 128
     nn_params:
+        n_blocks: 12
+        hidden_size: 768
+        n_heads: 12
+        cond_dim: 128
+        dropout: 0.1
+        scale_by_sigma: true
+        tie_word_embeddings: false
+        length: 1024
         simple_embed: true
         slim: true
     x0_model_class: Conv
@@ -35,5 +44,5 @@ train:
     weight_decay: 0
     gen_trans_step: 2000
     accumulate: 2
-    ema: true
+    ema: false
     pack: false

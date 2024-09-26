@@ -25,7 +25,7 @@ protein_nn_name_dict = {
 def get_model_setup(cfg, tokenizer=None):
     schedule_conditioning = cfg.model.model in [
         "ScheduleCondition", "DiscreteScheduleCondition",
-        "ScheduleConditionSparseK"
+        "ScheduleConditionSparseK", "MaskingDiffusion",
     ]
     nn_params = cfg.architecture.nn_params
     nn_params = (OmegaConf.to_container(nn_params, resolve=True)
@@ -50,7 +50,7 @@ def get_model_setup(cfg, tokenizer=None):
         
         nn_params = {
             "config": nn_params,
-            "vocab_size": len(tokenizer),
+            "vocab_size": cfg.data.N,#len(tokenizer),
             "schedule_conditioning": schedule_conditioning,
         }
         

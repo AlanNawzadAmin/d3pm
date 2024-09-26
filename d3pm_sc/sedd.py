@@ -43,7 +43,7 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         assert torch.allclose(torch.imag(stationary), torch.tensor(0, dtype=self.L.dtype))
         stationary = torch.real(stationary)
         stationary = stationary * torch.sign(stationary)
-        assert torch.all(stationary > 0)
+        assert torch.all(stationary >= 0)
         return stationary / stationary.sum()
 
     def get_trans_mats(self, t):
