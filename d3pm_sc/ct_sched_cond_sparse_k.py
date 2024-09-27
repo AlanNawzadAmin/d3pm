@@ -326,7 +326,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
             S_sort = S.flatten()[sort]
             k_sort = k.flatten()[sort]
             predicted_x0_logits_sort = predicted_x0_logits.reshape(-1, self.num_classes)[sort]
-            pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits_sort, x_sort, t, S_sort, k_sort=k_sort).reshape(*x.shape, self.num_classes)
+            pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits_sort, x_sort, t, S_sort, k_sort=k_sort)[unsort].reshape(*x.shape, self.num_classes)
             # sample
             noise = torch.clip(noise, self.eps, 1.0)
             gumbel_noise = -torch.log(-torch.log(noise))
