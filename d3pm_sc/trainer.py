@@ -63,7 +63,7 @@ def get_text(sample_x, sample_a, model, gen_trans_step, batch_size, tokenizer):
     )
     if tokens is not None:
         last_token = tokens[-1]
-        stride_tokens = tokens[::(gen_trans_step // 3)//10]
+        stride_tokens = tokens[::(gen_trans_step // 3)//10 + 1]
         if sample_a is not None:
             if hasattr(tokenizer, 'pad_id'):
                 pad_id = tokenizer.pad_id
@@ -162,6 +162,7 @@ class DiffusionTrainer(pl.LightningModule):
 
         # x, cond = x.to(device), cond.to(device)
         loss, info = self(x, cond, attn_mask)
+        print(info['vb_loss'], self.get_kl_t1(x).detach().item())
         self.log('val_l01', info['vb_loss'], on_step=False, on_epoch=True, sync_dist=True)
         self.log('val_l1', self.get_kl_t1(x).detach().item(), on_step=False, on_epoch=True, sync_dist=True)
         self.log('val_ce_loss', info['ce_loss'], on_step=False, on_epoch=True, sync_dist=True)
@@ -184,7 +185,7 @@ class DiffusionTrainer(pl.LightningModule):
                             wandb.log({"sample_gif_last": wandb.Image(img_fname)})
                 else:
                     print("getting text")
-                    last_text, gen_text = get_text(self.sample_x, self.sample_a, self, self.gen_trans_step, self.n_gen_images, self.tokenizer)
+                    last_text, gen_text = get_text(self.sample_x, self.sample_a, self, 3, self.n_gen_images, self.tokenizer)
                     if last_text is not None:
                         if isinstance(self.logger, pl.loggers.WandbLogger):
                             joined_text = "\n\n".join(last_text)

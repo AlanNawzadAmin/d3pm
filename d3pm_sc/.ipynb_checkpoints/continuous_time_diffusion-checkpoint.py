@@ -101,6 +101,33 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
         )
         return sample
 
+    def load_state_dict(self, state_dict, strict=True):
+        # Call the parent class's load_state_dict method
+        missing_keys, unexpected_keys = super().load_state_dict(state_dict, strict=False)
+
+        # Load the additional state dict variables
+        for key in ['p0_inds', 'p0_rank', 'K', 'L', 'K_coo', 'K_csc', 'K_T', 'L_T', 'stat', 'stationary']:
+            if key in state_dict:
+                setattr(self, key, state_dict[key])
+                if key in unexpected_keys:
+                    unexpected_keys.remove(key)
+            elif strict:
+                missing_keys.append(key)
+
+        if strict:
+            error_msgs = []
+            if len(unexpected_keys) > 0:
+                error_msgs.append('unexpected key(s) in state_dict: {}. '.format(', '.join('"{}"'.format(k) for k in unexpected_keys)))
+            if len(missing_keys) > 0:
+                error_msgs.append('missing key(s) in state_dict: {}. '.format(', '.join('"{}"'.format(k) for k in missing_keys)))
+
+            if len(error_msgs) > 0:
+                raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+                                    self.__class__.__name__, "\n\t".join(error_msgs)))
+
+        return missing_keys, unexpected_keys
+
+
     @classmethod
     def load_from_checkpoint(cls, checkpoint_path, map_location=None, **kwargs):
         print("Loading checkpoint ...")

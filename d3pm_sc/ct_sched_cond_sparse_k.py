@@ -65,13 +65,17 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
     def pre_configure_model(self, dataloader):
         if not hasattr(self, 'p0'):
             self.calc_p0(dataloader)
-        p0_inds = torch.flip(torch.argsort(self.p0), (0,))
-        p0_rank = torch.argsort(p0_inds)
-        self.register_buffer("p0_inds", p0_inds)
-        self.register_buffer("p0_rank", p0_rank)
+        if not hasattr(self, 'p0_inds'):
+            p0_inds = torch.flip(torch.argsort(self.p0), (0,))
+            p0_rank = torch.argsort(p0_inds)
+            self.register_buffer("p0_inds", p0_inds)
+            self.register_buffer("p0_rank", p0_rank)
+        else:
+            p0_inds = self.p0_inds
+            p0_rank = self.p0_rank
         if self.eff_num_classes < self.num_classes:
             self.freq_order = True
-            mat_inds = p0_inds[:self.eff_num_classes]
+            mat_inds = p0_inds[:self.eff_num_classes].cpu()
         else:
             self.freq_order = False
             self.eff_num_classes = self.num_classes
@@ -79,26 +83,37 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         
         # Precalculate K_powers of KNN process
         L, K, L_cpu, K_cpu, rate = get_L_and_K(self.forward_kwargs, self.gamma, mat_inds)
-
-        self.rate = max([rate, 1 if self.freq_order else 1e-6])
-        self.register_buffer("K", K)
-        self.register_buffer("L", L)
-        K_coo = K.to_sparse_coo()
-        K_csc = K.to_sparse_csc()
-        K_T = K_coo.transpose(0, 1).coalesce().to_sparse_csr()
-        L_coo = L.to_sparse_coo()
-        L_T = L_coo.transpose(0, 1).coalesce().to_sparse_csr()
-        self.register_buffer("K_coo", K_coo)
-        self.register_buffer("K_csc", K_csc)
-        self.register_buffer("K_T", K_T)
-        self.register_buffer("L_T", L_T)
-
+        if not hasattr(self, 'K'):    
+            self.rate = max([rate, 1 if self.freq_order else 1e-6])
+            self.register_buffer("K", K)
+            self.register_buffer("L", L)
+            K_coo = K.to_sparse_coo()
+            K_csc = K.to_sparse_csc()
+            K_T = K_coo.transpose(0, 1).coalesce().to_sparse_csr()
+            L_coo = L.to_sparse_coo()
+            L_T = L_coo.transpose(0, 1).coalesce().to_sparse_csr()
+            self.register_buffer("K_coo", K_coo)
+            self.register_buffer("K_csc", K_csc)
+            self.register_buffer("K_T", K_T)
+            self.register_buffer("L_T", L_T)
+        else:
+            self.rate = max([rate, 1 if self.freq_order else 1e-6])
+            K = self.K
+            L = self.L
+            K_coo = self.K_coo
+            K_csc = self.K_csc
+            K_T = self.K_T
+            L_T = self.L_T
+            
         print("Setting up K and L operators...")
         # Add in uniform process
         self.unif_to_stat = self.forward_kwargs['unif_to_stat']
-        stat = (self.p0[:self.eff_num_classes] / self.p0[:self.eff_num_classes].sum() if self.unif_to_stat
-                else torch.ones(self.eff_num_classes) / self.eff_num_classes)
-        self.register_buffer("stat", stat)
+        if not hasattr(self, 'stat'):
+            stat = (self.p0[self.p0_inds][:self.eff_num_classes] / self.p0[:self.eff_num_classes].sum() if self.unif_to_stat
+                    else torch.ones(self.eff_num_classes) / self.eff_num_classes)
+            self.register_buffer("stat", stat)
+        else:
+            stat = self.stat
         self.unif_rate = self.forward_kwargs['uniform_rate'] * (1 if self.freq_order else torch.tensor(1-self.stat).max())
         self.rate = self.rate + self.unif_rate
         self.up = self.unif_rate / self.rate
@@ -175,7 +190,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
             # S=1
             active = S >= 0
             if freq_order:
-                x_grad[eff_num_classes:, active] = (1-self.up) * stat @ submat[:, active]
+                x_grad[eff_num_classes:, active] = stat @ submat[:, active]
             submat[:, active] = K_operator_vec(K, submat[:, active], stat)
             return x_grad
 
@@ -186,11 +201,12 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         self.K_power_loop = K_power_loop
         self.K_power_loop_naive = K_power_loop_naive
         self.second_eval = self.up
-        self.calc_stationary()
+        if not hasattr(self, 'stationary'):
+            self.calc_stationary()
 
         print("Getting Mutual info schedule")
         mis = []
-        p0_gpu = self.p0.cuda()
+        p0_gpu = self.p0.cuda()[self.p0_inds]
         p0_gpu = p0_gpu / p0_gpu.sum()
         stat_cuda = self.stat.cuda()
         mat = torch.eye(self.num_classes).float().cuda()
@@ -240,13 +256,15 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         return self.stationary / self.stationary.sum()
 
     def get_kl_t1(self, x):
+        if self.freq_order:
+            x = self.p0_rank[x]
         # sample S
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
         S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
         S = S.swapaxes(0, 1).reshape(*x.shape).long()
         softmaxed = convert_to_norm_distribution(x, self.num_classes, self.eps)
         x_1 = self.K_T_power_mult(S, softmaxed)
-        kl = kls(x_1[..., :self.eff_num_classes], torch.log(self.get_stationary() + self.eps), self.eps)
+        kl = kls(torch.log(x_1[..., :self.eff_num_classes] + self.eps), torch.log(self.get_stationary() + self.eps), self.eps)
         return kl.mean()
 
     def x_t_sample(self, x_0, t, noise, S):
@@ -262,7 +280,8 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         x_t_sample_sort = torch.argmax(x_t_probs/inv_gumbel_noise, dim=-1)
         return x_t_sample_sort
 
-    def q_posterior_logits(self, x_0_sort, x_t_sort, t, S_sort, use_cached_fact2=False, log_fact1=None, k_sort=1):
+    def q_posterior_logits(self, x_0_sort, x_t_sort, t, S_sort,
+                           use_cached_fact2=False, log_fact1=None, k_sort=1):
         if use_cached_fact2:
             fact2 = self.cache_sm1_power
             # print("cache check:", ((fact2 - self.K_T_power_mult(S_sort-1, softmaxed.float()))**2).sum())
@@ -272,6 +291,8 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
                 fact2 = softmaxed
             else:
                 fact2 = self.K_T_power_mult(S_sort-k_sort, softmaxed.float())
+            print(fact2[..., 357].max())
+            print(x_t_sort[fact2[..., 357].argmax()])
         if log_fact1 is None:
             if (isinstance(k_sort, (int, float)) and k_sort == 1):
                 log_fact1 = torch.log(self.K_operator(x_t_sort) + self.eps)
@@ -281,6 +302,8 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
                 K_k_x_t = self.K_power_loop_naive(x_grad, self.K, k_sort, self.stat,
                                          self.eff_num_classes, self.freq_order, self.up)
                 log_fact1 = torch.log(K_k_x_t.T.reshape(softmax_t.shape) + self.eps)
+                print(torch.exp(log_fact1[..., 357]).max())
+                print(x_t_sort[torch.exp(log_fact1[..., 357]).argmax()])
         out = torch.log(fact2 + self.eps) + log_fact1
         return out
 
@@ -374,6 +397,6 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         if steps % stride != 0:
             images.append(x)
 
-        return images
+        return [self.p0_inds[im.long()] for im in images]
 
 
