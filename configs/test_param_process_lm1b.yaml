@@ -12,9 +12,7 @@ metric:
 parameters:
   model.seed:
     value: 0
-  model.forward_kwargs.uniform_rate:
-    value: 0.99
   model.forward_kwargs.unif_to_stat:
     values: [true, false]
   model.forward_kwargs.uniform_rate:
-    values: [0.4, 0.99]
+    values: [0.4, 1]

@@ -185,7 +185,7 @@ class DiffusionTrainer(pl.LightningModule):
                             wandb.log({"sample_gif_last": wandb.Image(img_fname)})
                 else:
                     print("getting text")
-                    last_text, gen_text = get_text(self.sample_x, self.sample_a, self, 3, self.n_gen_images, self.tokenizer)
+                    last_text, gen_text = get_text(self.sample_x, self.sample_a, self, self.gen_trans_step, self.n_gen_images, self.tokenizer)
                     if last_text is not None:
                         if isinstance(self.logger, pl.loggers.WandbLogger):
                             joined_text = "\n\n".join(last_text)
