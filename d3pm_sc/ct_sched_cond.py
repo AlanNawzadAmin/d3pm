@@ -73,7 +73,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         trans_mats = self.K_powers[S, :, :]
         softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
         x_1 = torch.log(torch.einsum("b...c,b...cd->b...d", softmaxed, trans_mats)+self.eps)
-        kl = kls(torch.log(self.get_stationary() + self.eps), x_1, self.eps)
+        kl = kls(x_1, torch.log(self.get_stationary() + self.eps), self.eps)
         return kl.mean()
 
     def x_t_sample(self, x_0, t, noise, S):
