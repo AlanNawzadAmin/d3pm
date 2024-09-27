@@ -752,8 +752,11 @@ def get_protein_dataloaders(cfg):
     if hasattr(cfg.train, 'pack') and cfg.train.pack:
         block_size = 13
         def collate_fn_pack(batch):
-            batch = np.array([string[0] + tokenizer.pad for string in batch])
-            strings = batch.reshape(-1, block_size)
+            batch = [string[0] + tokenizer.pad for string in batch]
+            if len(batch) % block_size != 0:
+                batch = batch + (block_size - len(batch) % block_size) * ['']
+            strings = np.array(batch).reshape(-1, block_size)
+            strings[0, 1:] = ''
             strings = [(''.join(strs)[:max_len],) for strs in strings]
             return collate_fn(strings)
         train_dataloader = DataLoader(train_dataset, batch_size=batch_size* block_size, num_workers=num_workers, shuffle=True, collate_fn=collate_fn_pack)

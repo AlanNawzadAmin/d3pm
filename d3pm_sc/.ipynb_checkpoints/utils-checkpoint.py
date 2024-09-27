@@ -62,6 +62,11 @@ def get_inf_gen(forward_kwargs, num_classes):
         cond_liks = cond_liks ** forward_kwargs['beta']
         cond_liks = cond_liks / cond_liks.sum(-1)[:, None]
         L = torch.tensor(cond_liks - np.eye(len(cond_liks))).float()
+    if ("make_sym" in forward_kwargs.keys() and forward_kwargs['make_sym']):
+        L = (L + L.T) / 2
+        range_ = torch.arange(num_classes)
+        L.diagonal().fill_(0)
+        L[range_, range_] = -L.sum(-1)
     if (("normalize" in forward_kwargs.keys() and forward_kwargs['normalize'])
         or ("normalized" in forward_kwargs.keys() and forward_kwargs['normalized'])):
         L = L / (- L.diagonal()[:, None])
