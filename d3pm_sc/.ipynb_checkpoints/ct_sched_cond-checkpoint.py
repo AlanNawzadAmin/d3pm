@@ -137,7 +137,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         n_steps = torch.tensor([S[b].sum() for b in range(len(S))]).max().item()
         pbar = tqdm(total=n_steps, unit="iteration",
                     position=0, leave=True)
-        trans_step = n_steps // n_T
+        trans_step = max([n_steps // n_T, 1])
         while S.sum() > 0:
             k = torch.zeros_like(S)
             S_temp = S.clone()

@@ -106,7 +106,8 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         bwd_inf_gen = self.r_posterior(predicted_x0_logits, x, t,None)
         x_0_logits = convert_to_distribution(x, self.num_classes, self.eps)
         softmaxed = torch.softmax(x_0_logits, dim=-1)
-        pred_r_posterior = torch.log(softmaxed + delta_t * bwd_inf_gen)
+        pred_r_posterior = torch.clip(softmaxed + delta_t * bwd_inf_gen, self.eps, 1.0)
+        pred_r_posterior = torch.log(pred_r_posterior)
         # sample
         noise = torch.clip(noise, self.eps, 1.0)
         not_first_step = (t != 0).float().reshape((x.shape[0], *[1] * (x.dim())))

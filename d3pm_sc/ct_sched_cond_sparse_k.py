@@ -109,7 +109,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         # Add in uniform process
         self.unif_to_stat = self.forward_kwargs['unif_to_stat']
         if not hasattr(self, 'stat'):
-            stat = (self.p0[self.p0_inds][:self.eff_num_classes] / self.p0[:self.eff_num_classes].sum() if self.unif_to_stat
+            stat = (self.p0[self.p0_inds][:self.eff_num_classes] / self.p0[self.p0_inds][:self.eff_num_classes].sum() if self.unif_to_stat
                     else torch.ones(self.eff_num_classes) / self.eff_num_classes)
             self.register_buffer("stat", stat)
         else:

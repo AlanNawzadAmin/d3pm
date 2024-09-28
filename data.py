@@ -9,6 +9,7 @@ import typing
 import urllib
 import zipfile
 
+import multiprocessing
 import datasets
 import fsspec
 import requests
@@ -426,13 +427,13 @@ def get_dataset(
       'openwebtext',
       split='train[:-100000]',
       cache_dir=cache_dir,
-      streaming=streaming)
+      streaming=streaming, trust_remote_code=True)
   elif dataset_name == 'openwebtext-valid':
     dataset = datasets.load_dataset(
       'openwebtext',
       split='train[-100000:]',
       cache_dir=cache_dir,
-      streaming=streaming)
+      streaming=streaming, trust_remote_code=True)
   elif dataset_name == 'scientific_papers_arxiv':
     dataset = datasets.load_dataset(
       'scientific_papers', 'arxiv',
@@ -449,12 +450,12 @@ def get_dataset(
     dataset = datasets.load_dataset(
       'ag_news',
       cache_dir=cache_dir,
-      streaming=streaming)
+      streaming=streaming, trust_remote_code=True)
   else:
     dataset = datasets.load_dataset(
       dataset_name,
       cache_dir=cache_dir,
-      streaming=streaming)
+      streaming=streaming, trust_remote_code=True)
 
   if dataset_name in ['lambada', 'openwebtext-train',
                       'openwebtext-valid']:
@@ -660,7 +661,7 @@ def get_text_dataloaders(
       streaming=False
     )
 
-  num_workers = 16//max([1, torch.cuda.device_count()])
+  num_workers = multiprocessing.cpu_count()//max([1, torch.cuda.device_count()])
 
   if skip_train:
     train_loader = None
@@ -722,7 +723,7 @@ def get_img_dataloaders(cfg):
     train_size = int(len(full_dataset) * 0.9)
     train_dataset, test_dataset = random_split(full_dataset, [train_size, len(full_dataset) - train_size])
     
-    num_workers = 16//torch.cuda.device_count()
+    num_workers = multiprocessing.cpu_count()//torch.cuda.device_count()
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, collate_fn=collate_fn)
 
@@ -748,7 +749,7 @@ def get_protein_dataloaders(cfg):
         tokenized = _pad(tokenized, tokenizer.pad_id)
         return mask_pad(tokenized)
     
-    num_workers = 16//torch.cuda.device_count()
+    num_workers = multiprocessing.cpu_count()//torch.cuda.device_count()
     if hasattr(cfg.train, 'pack') and cfg.train.pack:
         block_size = 13
         def collate_fn_pack(batch):

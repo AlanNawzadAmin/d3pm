@@ -71,13 +71,14 @@ class MaskingDiffusion(ScheduleCondition): #schedule conditioning is True!
     def sample_sequence(self, x, cond=None, attn_mask=None, n_T=200, stride=10):
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
         S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
+        t = t * 0
         S = (S>0).swapaxes(0, 1).reshape(*x.shape).long() # this is the only line changed
         steps = 0
         images = []
-        n_steps = S.sum(-1).sum(-1).sum(-1).max().item()
+        n_steps = torch.tensor([S[b].sum() for b in range(len(S))]).max().item()
         pbar = tqdm(total=n_steps, unit="iteration",
                     position=0, leave=True)
-        trans_step = n_steps // n_T
+        trans_step = max([n_steps // n_T, 1])
         while S.sum() > 0:
             # predict what comes next
             x_next = self.p_sample(
