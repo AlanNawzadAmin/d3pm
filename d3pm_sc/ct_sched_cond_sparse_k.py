@@ -111,6 +111,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         if not hasattr(self, 'stat'):
             stat = (self.p0[self.p0_inds][:self.eff_num_classes] / self.p0[self.p0_inds][:self.eff_num_classes].sum() if self.unif_to_stat
                     else torch.ones(self.eff_num_classes) / self.eff_num_classes)
+            stat = stat / stat.sum()
             self.register_buffer("stat", stat)
         else:
             stat = self.stat
