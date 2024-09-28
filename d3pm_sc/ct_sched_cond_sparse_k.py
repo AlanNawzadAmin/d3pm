@@ -266,7 +266,8 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         softmaxed = convert_to_norm_distribution(x, self.num_classes, self.eps)
         x_1 = self.K_T_power_mult(S, softmaxed)
         kl = kls(torch.log(x_1[..., :self.eff_num_classes] + self.eps), torch.log(self.get_stationary() + self.eps), self.eps)
-        return kl.mean()
+        not_included = torch.logical_and(S==0, x>=self.eff_num_classes).float()
+        return (kl * (1-not_included)).mean() - torch.log(torch.tensor(self.eps)) * not_included.mean()
 
     def x_t_sample(self, x_0, t, noise, S):
         S_sort, sort, unsort = get_sort_S(S)
