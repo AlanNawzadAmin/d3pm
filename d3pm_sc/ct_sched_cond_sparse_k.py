@@ -59,7 +59,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
             stationary = stationary_new
             if i%1000 == 0:
                 pbar.set_description(f"Getting stationary. err:{err.item()}")
-        stationary = stationary / (stationary ** 2).sum()
+        stationary = stationary / torch.sqrt((stationary ** 2).sum())
         self.register_buffer("stationary", stationary)
 
     def pre_configure_model(self, dataloader):
@@ -186,10 +186,10 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
             submat = x_grad[:eff_num_classes, :]
             # S>1
             for i in range(1, S.max())[::-1]:
-                active = S >= i
+                active = S >= (i+1)
                 submat[:, active] = K_operator_vec(K, submat[:, active].contiguous(), stat)
             # S=1
-            active = S >= 0
+            active = S >= 1
             if freq_order:
                 x_grad[eff_num_classes:, active] = stat @ submat[:, active]
             submat[:, active] = K_operator_vec(K, submat[:, active], stat)
@@ -292,8 +292,8 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
                 fact2 = softmaxed
             else:
                 fact2 = self.K_T_power_mult(S_sort-k_sort, softmaxed.float())
-            print(fact2[..., 357].max())
-            print(x_t_sort[fact2[..., 357].argmax()])
+            # print(fact2[..., 2].max())
+            # print(x_t_sort[fact2[..., 2].argmax()])
         if log_fact1 is None:
             if (isinstance(k_sort, (int, float)) and k_sort == 1):
                 log_fact1 = torch.log(self.K_operator(x_t_sort) + self.eps)
@@ -303,8 +303,8 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
                 K_k_x_t = self.K_power_loop_naive(x_grad, self.K, k_sort, self.stat,
                                          self.eff_num_classes, self.freq_order, self.up)
                 log_fact1 = torch.log(K_k_x_t.T.reshape(softmax_t.shape) + self.eps)
-                print(torch.exp(log_fact1[..., 357]).max())
-                print(x_t_sort[torch.exp(log_fact1[..., 357]).argmax()])
+                # print(torch.exp(log_fact1[..., 2]).max())
+                # print(x_t_sort[torch.exp(log_fact1[..., 2]).argmax()])
         out = torch.log(fact2 + self.eps) + log_fact1
         return out
 

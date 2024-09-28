@@ -29,25 +29,27 @@ class MaskingDiffusion(ScheduleCondition): #schedule conditioning is True!
             del kwargs['forward_kwargs']
         super().__init__(x0_model_class, nn_params, num_classes, forward_kwargs, schedule_type, gamma, hybrid_loss_coeff,
                          fix_x_t_bias, logistic_pars, input_logits, **kwargs)
+        self.use_bad_model_predict = ~ logistic_pars
         # with this choice, x_t_sample is uniform and 
         # q_posterior_logits returns uniform if S>1 and x_0 pred if S==1
         # The only differences is the predictions and marginalizing over S>1 in the weight
         # so we always assume S==1.
         # in principle we could also speed up sampling by ignoring S>1
 
-    # def model_predict(self, x_t, t, cond, S, attn_mask=None):
-    #     masked_pos = S > 0
-    #     masked_x_t = torch.where(masked_pos, self.num_classes, x_t)
-    #     inputs = dict(x=masked_x_t, t=t, cond=cond, S=None)
-    #     if attn_mask is not None: inputs["cond"] = attn_mask
-    #     return self.x0_model(**inputs)[..., :-1]
+    def bad_model_predict(self, x_t, t, cond, S=None):
+        masked_pos = S > 0
+        masked_x_t = torch.where(masked_pos, self.num_classes-1, x_t)
+        return self.x0_model(masked_x_t, t, cond, 0 * S).float()
     
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask: torch.Tensor = None) -> torch.Tensor:
         t, S, x_t = self.sample_point(x)
         S = (S>0).long()
         
         # predict x_0 and prev(x_t)
-        predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, S)
+        if self.use_bad_model_predict:
+            predicted_x0_logits = self.bad_model_predict(x_t, t, cond if cond is not None else attn_mask, S)
+        else:
+            predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, S)
         true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S)
         pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x_t, t, S)
 
