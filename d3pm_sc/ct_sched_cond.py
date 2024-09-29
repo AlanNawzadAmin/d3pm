@@ -159,6 +159,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
                 n_steps = trans_step * torch.ones(total_steps, device=S.device).float()
                 n_steps = torch.cumsum(n_steps, -1)
                 n_steps = torch.cat([torch.zeros_like(n_steps[[0]]), n_steps], axis=-1).long()
+                assert n_steps[-1] >= S[b].sum()
             
             indices = torch.argwhere(S[b].flatten() > 0)[:, 0]
             values = S[b].flatten()[indices]
@@ -178,14 +179,16 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
 
             # predict what comes next
             x = self.p_sample(
-                x, t, cond, attn_mask, torch.rand((*x.shape, self.num_classes), device=x.device), S, k=k,
+                x, t, cond, attn_mask,
+                torch.rand((*x.shape, self.num_classes), device=x.device),
+                S, k=k,
             )
             assert torch.all(S_temp <= S)
             S = S_temp
             pbar.update(trans_step)
             steps += 1
             if steps % stride == 0:
-                images.append(torch.clone(x))
+                images.append(torch.clone(S))
         pbar.close()
         # if last step is not divisible by stride, we add the last image.
         if steps % stride != 0:

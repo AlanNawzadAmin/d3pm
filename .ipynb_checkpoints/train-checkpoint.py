@@ -80,7 +80,7 @@ def train(cfg: DictConfig) -> None:
     model.pre_configure_model(train_dataloader)
 
     ##### Train
-    wandb.init()
+    # wandb.init()
     wandb_logger = WandbLogger(project="debugging")
     lightning_model = model
     torch.set_float32_matmul_precision('high')
@@ -98,7 +98,7 @@ def train(cfg: DictConfig) -> None:
         # strategy="ddp",# if ddp else 'auto'
         strategy=DDPStrategy(broadcast_buffers=False),
         callbacks=([EMA(0.9999)] * cfg.train.ema
-                   +[ModelCheckpoint(dirpath=f'checkpoints/{wandb.run.name}',
+                   +[ModelCheckpoint(dirpath=f'checkpoints/{wandb_logger.experiment.name}',
                                    save_on_train_epoch_end=False)]),
         val_check_interval=val_check_interval,
         accumulate_grad_batches=cfg.train.accumulate

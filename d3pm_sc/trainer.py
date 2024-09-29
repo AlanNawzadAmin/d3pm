@@ -9,6 +9,7 @@ from PIL import Image
 from torchvision.utils import make_grid
 import torch.nn.functional as F
 from tqdm import tqdm
+from .inception_score import inception_score
 
 def get_gif(sample_x, sample_a, model, gen_trans_step, batch_size):
     # save images
@@ -37,7 +38,8 @@ def get_gif(sample_x, sample_a, model, gen_trans_step, batch_size):
             #     device='cuda' if torch.cuda.is_available() else 'cpu'
             # )
             gif.append(Image.fromarray(img))
-    
+        is_ = inception_score([Image.fromarray(gif[-1])])
+        print("IS:", is_)
         with tempfile.NamedTemporaryFile(suffix='.gif', delete=False) as temp_file:
             gif[0].save(
                 temp_file.name,
