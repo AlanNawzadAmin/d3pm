@@ -95,7 +95,7 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
         pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x, t, S, k=k)
         # sample
         noise = torch.clip(noise, self.eps, 1.0)
-        gumbel_noise = -torch.log(-torch.log(noise))
+        gumbel_noise = -torch.log(-torch.log(noise)+self.eps)
         sample = torch.argmax(
             pred_q_posterior_logits + gumbel_noise, dim=-1
         )

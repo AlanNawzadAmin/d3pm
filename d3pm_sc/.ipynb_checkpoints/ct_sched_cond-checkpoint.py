@@ -156,9 +156,9 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
                 n_steps = torch.cat([torch.zeros_like(n_steps[[0]]), n_steps], axis=-1).long()
                 assert n_steps[-1] == S[b].sum()
             else:
-                n_steps = trans_step + 0 * S[0].flatten()[:, None].repeat(1, total_steps)
+                n_steps = trans_step * torch.ones(total_steps, device=S.device).float()
                 n_steps = torch.cumsum(n_steps, -1)
-                n_steps = torch.cat([torch.zeros_like(n_steps[:, [0]]), n_steps], axis=-1).long()
+                n_steps = torch.cat([torch.zeros_like(n_steps[[0]]), n_steps], axis=-1).long()
             
             indices = torch.argwhere(S[b].flatten() > 0)[:, 0]
             values = S[b].flatten()[indices]
