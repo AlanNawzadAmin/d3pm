@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
+import time
 
 from .utils import kls, convert_to_distribution, get_inf_gen
 from .schedule_sample import sample_n_transitions_cont
@@ -26,9 +27,27 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         self.save_hyperparameters(ignore=['x0_model_class'])
         self.fix_x_t_bias = fix_x_t_bias
 
-        # Precalculate Ks
+        # Get L
         L = get_inf_gen(forward_kwargs, num_classes)
         self.register_buffer("L", L)
+        eigenvalues, eigenvectors = torch.linalg.eig(L)
+        eigenvalues[torch.real(eigenvalues) > -self.eps] = 0
+        eigenvectors_inv = torch.linalg.inv(eigenvectors)
+        self.register_buffer("eigenvalues", eigenvalues)
+        self.register_buffer("eigenvectors", eigenvectors)
+        self.register_buffer("eigenvectors_inv", eigenvectors_inv)
+        # Get Ks just for fast sampling
+        gamma = 0
+        rate = - (L.diagonal().min()) / (1-gamma)
+        K = L / rate + torch.eye(num_classes)
+        self.rate = rate
+        
+        # Precalculate K_powers
+        num_powers = 5000
+        assert (num_classes <= 512 and forward_kwargs['type'] != "bert_embed")
+        K_powers = torch.stack([torch.linalg.matrix_power(K, i) for i in range(5000)])
+        self.register_buffer("K", K)
+        self.register_buffer("K_powers", K_powers)
 
     def pre_configure_model(self, dataloader):
         self.calc_p0(dataloader)
@@ -46,23 +65,31 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         assert torch.all(stationary >= 0)
         return stationary / stationary.sum()
 
-    def get_trans_mats(self, t):
+    def get_trans_mat(self, t):
         return torch.matrix_exp(- self.log_alpha(t)[..., None, None] * self.L)
+
+    def get_trans_mats_mvp(self, t, v):
+        # 
+        """ v is a b...c matrix where L is cd, and t is b """
+        dv = v.to(dtype=self.eigenvectors.dtype).reshape(v.shape[0], -1, v.shape[-1])
+        diag = torch.exp(-self.log_alpha(t)[..., None] * self.eigenvalues)
+        dv = dv @ self.eigenvectors
+        dv = dv * diag.unsqueeze(-2)
+        return (dv @ self.eigenvectors_inv).real.float().reshape(v.shape)
 
     def get_kl_t1(self, x):
         # sample S
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
         x_0_logits = convert_to_distribution(x, self.num_classes, self.eps)
         softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
-        x_1 = torch.log(torch.einsum("b...c,bcd->b...d", softmaxed, self.get_trans_mats(t)))
+        x_1 = self.get_trans_mats_mvp(t, softmaxed)
+        # x_1 = torch.log(torch.einsum("b...c,bcd->b...d", softmaxed, self.get_trans_mats(t)))
         kl = kls(x_1, self.get_stationary(), self.eps)
         return kl.mean()
 
     def x_t_sample(self, x_0, t, noise, S):
         # forward process, x_0 is the clean input.
-        x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
-        softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
-        logits = torch.log(torch.einsum("b...c,bcd->b...d", softmaxed, self.get_trans_mats(t)))
+        logits = torch.log(self.K_powers[S, x_0, :] + self.eps)
         noise = torch.clip(noise, self.eps, 1.0)
         gumbel_noise = -torch.log(-torch.log(noise))
         return torch.argmax(logits + gumbel_noise, dim=-1)
@@ -70,18 +97,29 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
     def r_posterior(self, x_0, x_t, t, S): # returns backward inf_gen
         x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
         softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
-        p_y = torch.einsum("b...c,bcd->b...d", softmaxed, self.get_trans_mats(t))
+        p_y = self.get_trans_mats_mvp(t, softmaxed)
+        # p_y = torch.einsum("b...c,bcd->b...d", softmaxed, self.get_trans_mats(t))
         p_xt = p_y.gather(-1, x_t.unsqueeze(-1)).squeeze(-1)
         ratios = (p_y + self.eps)/(p_xt[..., None] + self.eps)
-        ratios = ((ratios * self.L[x_t, :]).transpose(0, -1) * self.beta(t)).transpose(0, -1)
+        ratios = ((ratios * self.L.T[x_t, :]).transpose(0, -1) * self.beta(t)).transpose(0, -1)
         return ratios
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask=None, *args) -> torch.Tensor:
+        t0 = time.time()
         t, _, x_t = self.sample_point(x)
+        print("sample time:", time.time()-t0)
         # predict x_0 and prev(x_t)
+        t0 = time.time()
+        print(x_t.shape, t.shape, cond.shape)
         predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, None)
+        print("pred time:", time.time() - t0)
+        t0 = time.time()
         true_r_posterior = self.r_posterior(x, x_t, t, None)
         pred_r_posterior = self.r_posterior(predicted_x0_logits, x_t, t, None)
+        print("pred time:", time.time() - t0)
+        t0 = time.time()
+        self.log_alpha(t)
+        print("pred time:", time.time() - t0)
 
         # get kls and loss
         kl = (- (true_r_posterior * torch.log(F.relu(pred_r_posterior)+self.eps)

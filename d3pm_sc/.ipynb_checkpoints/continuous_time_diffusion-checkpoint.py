@@ -11,7 +11,7 @@ from d3pm_sc.mutual_info_schedule import get_a_b_func_mi
 
 def get_betas(schedule_type):
     if schedule_type in ['cos', 'linear']:
-        def get_funcs(L, p0, scale=1, type_=None):
+        def get_funcs(L, p0, model='SEDD', scale=1, type_=None):
             if schedule_type == 'cos':
                 alpha = lambda t: 1-torch.cos((1 - t) * torch.pi / 2)
                 alpha_prime = lambda t: -torch.sin((1 - t) * torch.pi / 2) * torch.pi / 2
@@ -111,8 +111,8 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
                 setattr(self, key, state_dict[key])
                 if key in unexpected_keys:
                     unexpected_keys.remove(key)
-            elif strict:
-                missing_keys.append(key)
+            # elif strict:
+            #     missing_keys.append(key)
 
         if strict:
             error_msgs = []

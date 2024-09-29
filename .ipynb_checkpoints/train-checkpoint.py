@@ -39,7 +39,8 @@ def train(cfg: DictConfig) -> None:
         in getpass.getuser() else "6a47f093d2a55e4f4e85b33767423f2db66355b8"
     wandb.login(key=wandb_key, relogin=True)
     ##### Load data
-    torch.manual_seed(cfg.model.seed)
+    if torch.cuda.device_count() <= 1:
+        torch.manual_seed(cfg.model.seed)
     train_dataloader, test_dataloader = get_dataloaders(cfg)
     tokenizer = train_dataloader.tokenizer if hasattr(train_dataloader, "tokenizer") else None
 

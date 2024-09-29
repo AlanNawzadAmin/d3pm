@@ -2,6 +2,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from tqdm import tqdm
+import math
+import time
 
 from .utils import kls, convert_to_distribution, get_inf_gen, sample_index_S
 from .schedule_sample import sample_n_transitions_cont
@@ -127,7 +129,8 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         }
 
     
-    def sample_sequence(self, x, cond=None, attn_mask=None, n_T=200, stride=10):
+    def sample_sequence(self, x, cond=None, attn_mask=None, n_T=200, stride=10,
+                       use_tau=False):
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
         S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
         t = t * 0
@@ -138,15 +141,40 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         pbar = tqdm(total=n_steps, unit="iteration",
                     position=0, leave=True)
         trans_step = max([n_steps // n_T, 1])
+        total_steps = math.ceil(n_steps/trans_step)
+        # get order of denoising
+        ks = torch.zeros([len(x), total_steps, len(S[0].flatten())], device=S.device, dtype=torch.long)
+        for b in range(len(x)):
+            # count how many in each bin
+            if use_tau:
+                ts = torch.linspace(0, self.t_max, total_steps+1, device=S.device).float()
+                weights = - self.log_alpha(ts)
+                diffs = weights[1:] - weights[:-1]
+                n_steps = torch.bincount(torch.multinomial(diffs, num_samples=S[b].sum(), replacement=True),
+                                         None, n_T)
+                n_steps = torch.cumsum(n_steps, -1)
+                n_steps = torch.cat([torch.zeros_like(n_steps[[0]]), n_steps], axis=-1).long()
+                assert n_steps[-1] == S[b].sum()
+            else:
+                n_steps = trans_step + 0 * S[0].flatten()[:, None].repeat(1, total_steps)
+                n_steps = torch.cumsum(n_steps, -1)
+                n_steps = torch.cat([torch.zeros_like(n_steps[:, [0]]), n_steps], axis=-1).long()
+            
+            indices = torch.argwhere(S[b].flatten() > 0)[:, 0]
+            values = S[b].flatten()[indices]
+            repeated_indices = torch.repeat_interleave(indices, values.long(), dim=0)
+            repeated_indices = repeated_indices[torch.randperm(repeated_indices.size(0))]
+            uniq = [torch.unique(repeated_indices[n_steps[step]:n_steps[1+step]],
+                    return_counts=True) for step in range(total_steps)]
+            for (u, c), i in zip(uniq, range(len(uniq))):
+                if len(u) > 0:
+                    ks[b][i][u] += c
+            ones = torch.ones_like(S)
+        assert torch.all(ks.sum(1) == S.reshape(len(x), -1))
         while S.sum() > 0:
-            k = torch.zeros_like(S)
-            S_temp = S.clone()
-            for b in range(len(x)):
-                for i in range(trans_step):
-                    if S_temp[b].sum()>0:
-                        ind = sample_index_S(S_temp[b] / S_temp[b].sum())
-                        k[b][ind] += 1
-                        S_temp[b][ind] -= 1
+            k = ks[:, steps, :].reshape(S.shape)
+            S_temp = S - k
+            assert torch.all(S_temp >= 0)
 
             # predict what comes next
             x = self.p_sample(

@@ -1,5 +1,24 @@
 import torch
+import math
+import numpy as np
+from tqdm import tqdm
 from d3pm_sc.root_finder import root_finder, newton_root_finder
+import hashlib
+import os
+
+def hash_matrix(matrix):
+    # Convert the matrix to a byte string
+    byte_string = matrix.cpu().numpy().tobytes()
+    
+    # Create a hash object (using SHA-256 in this example)
+    hash_object = hashlib.sha256()
+    
+    # Update the hash object with the byte string
+    hash_object.update(byte_string)
+    
+    # Get the hexadecimal representation of the hash
+    return hash_object.hexdigest()
+
 
 def get_a_b_func_cont(L, p0, **kwargs):
     ent_p0 = -torch.xlogy(p0, p0).sum()
@@ -21,17 +40,32 @@ def get_a_b_func_cont(L, p0, **kwargs):
         mi_m1 = (torch.xlogy(p, p).sum(-1) - torch.xlogy(p.sum(-2), p.sum(-2))).sum(-1) / ent_p0
         return mi_m1 + t_shift
 
-    base_ts = torch.linspace(0., 0.9991, 10000) 
-    def log_alpha_naive(ts):
-        out = newton_root_finder(mi, 1/second_eval, ts)
+    base_ts = torch.linspace(0., 0.9991, 1000000) 
+    def log_alpha_naive(ts, bs=1000):
+        batches = [ts[i*bs:(i+1)*bs] for i in range(
+            math.ceil(len(ts)/bs))]
+        guess_ts = torch.tensor([batch[len(batch) // 2] for batch in batches])
+        guesses = newton_root_finder(mi, 1/second_eval, guess_ts, print_=False)
+        out = [newton_root_finder(mi, guess, batch, print_=False, max_iter=20)
+               for batch, guess in tqdm(list(zip(batches, guesses)))]
+        out = torch.concat(out)
         # out = root_finder(mi, 0, 20/second_eval, ts)
         return -torch.where(out>1e-6, out, 1e-6)
-    base_alphas = -log_alpha_naive(base_ts)
+    hash_mat = hash_matrix(L)
+    if f'{hash_mat}.npy' in os.listdir('/scratch/aa11803/d3pm/save_alphas/'):
+        print("Loading alphas. Note: I hope p0 is similar to before!")
+        base_alphas = np.load(f'/scratch/aa11803/d3pm/save_alphas/{hash_mat}.npy')
+        base_alphas = torch.tensor(base_alphas)
+    else:
+        base_alphas = -log_alpha_naive(base_ts)
+        np.save(f'/scratch/aa11803/d3pm/save_alphas/{hash_mat}.npy', base_alphas.cpu().numpy())
+        np.save(f'/scratch/aa11803/d3pm/save_alphas/{hash_mat}_mat.npy', L.cpu().numpy())
     def log_alpha(ts):
         closest_index = torch.searchsorted(base_ts, ts.to('cpu'))
-        best_guess_l = base_alphas[closest_index-1]
+        best_guess_l = base_alphas[closest_index]
         # best_guess_u = base_alphas[closest_index]
-        out = newton_root_finder(mi, best_guess_l, ts.to('cpu'))
+        # out = newton_root_finder(mi, best_guess_l, ts.to('cpu'))
+        out = best_guess_l
         # out = root_finder(mi, best_guess_l, best_guess_u, ts)
         return -torch.where(out>1e-6, out, 1e-6).to(ts.device)
     

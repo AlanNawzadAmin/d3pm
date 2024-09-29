@@ -399,6 +399,8 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         if steps % stride != 0:
             images.append(x)
 
-        return [self.p0_inds[im.long()] for im in images]
+        if self.freq_order:
+            images = [self.p0_inds[im.long()] for im in images]
+        return images
 
 

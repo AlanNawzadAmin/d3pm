@@ -661,7 +661,8 @@ def get_text_dataloaders(
       streaming=False
     )
 
-  num_workers = multiprocessing.cpu_count()//max([1, torch.cuda.device_count()])
+    # multiprocessing.cpu_count()
+  num_workers = 16//max([1, torch.cuda.device_count()])
 
   if skip_train:
     train_loader = None
@@ -700,9 +701,20 @@ def get_text_dataloaders(
 def get_img_dataloaders(cfg):
     batch_size = cfg.train.batch_size
         
-    full_dataset = image_data_name_dict[cfg.data.data](
+    train_dataset = image_data_name_dict[cfg.data.data](
         "./data",
         train=True,
+        download=True,
+        transform=transforms.Compose(
+            [
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+            ]
+        ),
+    )
+    test_dataset = image_data_name_dict[cfg.data.data](
+        "./data",
+        train=False,
         download=True,
         transform=transforms.Compose(
             [
@@ -720,10 +732,11 @@ def get_img_dataloaders(cfg):
         x = (x * (cfg.data.N - 1)).round().long().clamp(0, cfg.data.N - 1)
         return x, cond
     
-    train_size = int(len(full_dataset) * 0.9)
-    train_dataset, test_dataset = random_split(full_dataset, [train_size, len(full_dataset) - train_size])
-    
-    num_workers = multiprocessing.cpu_count()//torch.cuda.device_count()
+    # train_size = int(len(full_dataset) * 0.9)
+    # train_dataset, test_dataset = random_split(full_dataset, [train_size, len(full_dataset) - train_size])
+
+    # multiprocessing.cpu_count()
+    num_workers = 16//torch.cuda.device_count()
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, collate_fn=collate_fn)
 
@@ -748,8 +761,9 @@ def get_protein_dataloaders(cfg):
         tokenized = [torch.tensor(tokenizer.tokenize(s)) for s in batch]
         tokenized = _pad(tokenized, tokenizer.pad_id)
         return mask_pad(tokenized)
-    
-    num_workers = multiprocessing.cpu_count()//torch.cuda.device_count()
+
+    # multiprocessing.cpu_count()
+    num_workers = 16//torch.cuda.device_count()
     if hasattr(cfg.train, 'pack') and cfg.train.pack:
         block_size = 13
         def collate_fn_pack(batch):
