@@ -19,6 +19,15 @@ def hash_matrix(matrix):
     # Get the hexadecimal representation of the hash
     return hash_object.hexdigest()
 
+def try_load(func, fname, path='/scratch/aa11803/d3pm/save_alphas/'):
+    if fname in os.listdir(path):
+        print("Loading alphas. Note: I hope p0 is similar to before!")
+        val = np.load(path+fname)
+        val = torch.tensor(val)
+    else:
+        val = func()#- log_alpha_naive(base_ts)
+        np.save(path+fname, val.cpu().numpy())
+    return val
 
 def get_a_b_func_cont(L, p0, **kwargs):
     ent_p0 = -torch.xlogy(p0, p0).sum()
@@ -52,14 +61,8 @@ def get_a_b_func_cont(L, p0, **kwargs):
         # out = root_finder(mi, 0, 20/second_eval, ts)
         return -torch.where(out>1e-6, out, 1e-6)
     hash_mat = hash_matrix(L)
-    if f'{hash_mat}.npy' in os.listdir('/scratch/aa11803/d3pm/save_alphas/'):
-        print("Loading alphas. Note: I hope p0 is similar to before!")
-        base_alphas = np.load(f'/scratch/aa11803/d3pm/save_alphas/{hash_mat}.npy')
-        base_alphas = torch.tensor(base_alphas)
-    else:
-        base_alphas = -log_alpha_naive(base_ts)
-        np.save(f'/scratch/aa11803/d3pm/save_alphas/{hash_mat}.npy', base_alphas.cpu().numpy())
-        np.save(f'/scratch/aa11803/d3pm/save_alphas/{hash_mat}_mat.npy', L.cpu().numpy())
+    try_load(lambda : L, f'{hash_mat}_mat.npy')
+    base_alphas = try_load(lambda: -log_alpha_naive(base_ts), f'{hash_mat}.npy')
     def log_alpha(ts):
         closest_index = torch.searchsorted(base_ts, ts.to('cpu'))
         best_guess_l = base_alphas[closest_index]
@@ -69,10 +72,20 @@ def get_a_b_func_cont(L, p0, **kwargs):
         # out = root_finder(mi, best_guess_l, best_guess_u, ts)
         return -torch.where(out>1e-6, out, 1e-6).to(ts.device)
     
+    def naive_beta(ts, bs=10000):
+        batches = [ts[i*bs:(i+1)*bs] for i in range(
+            math.ceil(len(ts)/bs))]
+        grad = []
+        for batch in batches:
+            out_tensor = -log_alpha(batch.to('cpu'))
+            grad.append(-1 / torch.func.grad(lambda o: mi(o).sum())(out_tensor))
+        return torch.cat(grad).to(ts.device)
+    base_betas = try_load(lambda: naive_beta(base_ts), f'{hash_mat}_beta.npy')
     def beta(ts):
-        out_tensor = -log_alpha(ts.to('cpu'))
-        grad = -1 / torch.func.grad(lambda o: mi(o).sum())(out_tensor)
-        return grad.to(ts.device)
+        closest_index = torch.searchsorted(base_ts, ts.to('cpu'))
+        best_guess_l = base_betas[closest_index]
+        out = best_guess_l
+        return out.to(ts.device)
     return log_alpha, beta, mi
 
 

@@ -188,7 +188,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
             pbar.update(trans_step)
             steps += 1
             if steps % stride == 0:
-                images.append(torch.clone(S))
+                images.append(torch.clone(x))
         pbar.close()
         # if last step is not divisible by stride, we add the last image.
         if steps % stride != 0:

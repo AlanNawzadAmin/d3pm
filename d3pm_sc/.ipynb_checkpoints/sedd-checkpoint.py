@@ -105,21 +105,21 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         return ratios
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask=None, *args) -> torch.Tensor:
-        t0 = time.time()
+        # t0 = time.time()
         t, _, x_t = self.sample_point(x)
-        print("sample time:", time.time()-t0)
+        # print("sample time:", time.time()-t0)
         # predict x_0 and prev(x_t)
-        t0 = time.time()
-        print(x_t.shape, t.shape, cond.shape)
+        # t0 = time.time()
+        # print(x_t.shape, t.shape, cond.shape)
         predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, None)
-        print("pred time:", time.time() - t0)
-        t0 = time.time()
+        # print("pred time:", time.time() - t0)
+        # t0 = time.time()
         true_r_posterior = self.r_posterior(x, x_t, t, None)
         pred_r_posterior = self.r_posterior(predicted_x0_logits, x_t, t, None)
-        print("pred time:", time.time() - t0)
-        t0 = time.time()
-        self.log_alpha(t)
-        print("pred time:", time.time() - t0)
+        # print("pred time:", time.time() - t0)
+        # t0 = time.time()
+        # self.log_alpha(t)
+        # print("pred time:", time.time() - t0)
 
         # get kls and loss
         kl = (- (true_r_posterior * torch.log(F.relu(pred_r_posterior)+self.eps)

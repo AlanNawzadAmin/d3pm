@@ -31,15 +31,8 @@ def get_gif(sample_x, sample_a, model, gen_trans_step, batch_size):
             x_as_image = make_grid(image.float() / (model.num_classes - 1), nrow=2)
             img = x_as_image.permute(1, 2, 0).cpu().numpy()
             img = (img * 255).astype(np.uint8)
-            # fid = fid_score.calculate_fid_given_images(
-            #     real_images.numpy(),
-            #     img.numpy(),
-            #     batch_size=50,
-            #     device='cuda' if torch.cuda.is_available() else 'cpu'
-            # )
             gif.append(Image.fromarray(img))
-        is_ = inception_score([Image.fromarray(gif[-1])])
-        print("IS:", is_)
+
         with tempfile.NamedTemporaryFile(suffix='.gif', delete=False) as temp_file:
             gif[0].save(
                 temp_file.name,
