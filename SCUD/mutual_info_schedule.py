@@ -19,7 +19,7 @@ def hash_matrix(matrix):
     # Get the hexadecimal representation of the hash
     return hash_object.hexdigest()
 
-def try_load(func, fname, path='/scratch/aa11803/d3pm/save_alphas/'):
+def try_load(func, fname, path=''):
     if fname in os.listdir(path):
         print("Loading alphas. Note: I hope p0 is similar to before!")
         val = np.load(path+fname)

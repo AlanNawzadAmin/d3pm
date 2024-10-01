@@ -2,7 +2,7 @@ data:
     data: lm1b
     valid: lm1b
     tokenizer_name_or_path: bert-base-uncased 
-    cache_dir: /scratch/nvg7279/sched_diff/data_cache
+    cache_dir: ...
     wrap: true
     N: 30522
     conditional: false

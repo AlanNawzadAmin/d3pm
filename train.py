@@ -35,9 +35,6 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 
 @hydra.main(version_base=None, config_path="configs", config_name="basic")
 def train(cfg: DictConfig) -> None:
-    wandb_key = "9e61d229e6b9dbfef3e2199c7e093a75bfe53135" if 'nvg' \
-        in getpass.getuser() else "6a47f093d2a55e4f4e85b33767423f2db66355b8"
-    wandb.login(key=wandb_key, relogin=True)
     ##### Load data
     if torch.cuda.device_count() <= 1:
         torch.manual_seed(cfg.model.seed)
