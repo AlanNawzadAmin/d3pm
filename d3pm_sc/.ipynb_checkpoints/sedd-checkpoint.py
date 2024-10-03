@@ -149,7 +149,7 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         # sample
         noise = torch.clip(noise, self.eps, 1.0)
         not_first_step = (t != 0).float().reshape((x.shape[0], *[1] * (x.dim())))
-        gumbel_noise = -torch.log(-torch.log(noise))
+        gumbel_noise = -torch.log(-torch.log(noise)+self.eps)
         sample = torch.argmax(
             pred_r_posterior + gumbel_noise * not_first_step, dim=-1
         )
