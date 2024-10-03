@@ -45,7 +45,7 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         # Precalculate K_powers
         num_powers = 5000
         assert (num_classes <= 512 and forward_kwargs['type'] != "bert_embed")
-        K_powers = torch.stack([torch.linalg.matrix_power(K, i) for i in range(5000)])
+        K_powers = torch.stack([torch.linalg.matrix_power(K, i) for i in tqdm(range(5000), desc="Making K powers")])
         self.register_buffer("K", K)
         self.register_buffer("K_powers", K_powers)
 
