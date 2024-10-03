@@ -13,6 +13,7 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.utilities import rank_zero_only
 
 from evodiff.utils import Tokenizer
 
@@ -35,9 +36,13 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 
 @hydra.main(version_base=None, config_path="configs", config_name="basic")
 def train(cfg: DictConfig) -> None:
-    wandb_key = "9e61d229e6b9dbfef3e2199c7e093a75bfe53135" if 'nvg' \
-        in getpass.getuser() else "6a47f093d2a55e4f4e85b33767423f2db66355b8"
-    wandb.login(key=wandb_key, relogin=True)
+    @rank_zero_only
+    def init_wandb():
+        wandb_key = "9e61d229e6b9dbfef3e2199c7e093a75bfe53135" if 'nvg' \
+            in getpass.getuser() else "6a47f093d2a55e4f4e85b33767423f2db66355b8"
+        wandb.login(key=wandb_key, relogin=True)
+        wandb.init()
+    init_wandb()
     ##### Load data
     if torch.cuda.device_count() <= 1:
         torch.manual_seed(cfg.model.seed)
@@ -56,6 +61,7 @@ def train(cfg: DictConfig) -> None:
                        "SEDD": SEDD,
                        "DiscreteScheduleCondition":DiscreteScheduleCondition,
                        "D3PMClassic":D3PMClassic}
+    using_lang = cfg.model.model == "ScheduleConditionSparseK"
     model = model_name_dict[cfg.model.model](
         x0_model_class,
         nn_params,
@@ -84,6 +90,10 @@ def train(cfg: DictConfig) -> None:
     wandb_logger = WandbLogger(project="debugging")
     lightning_model = model
     torch.set_float32_matmul_precision('high')
+    @rank_zero_only
+    def update_wandb_config():
+        wandb.config.update(lightning_model.hparams)
+    update_wandb_config()
 
     # ddp = not cfg.model.model == "ScheduleConditionSparseK"
     if cfg.data.data == 'uniref50':
@@ -96,7 +106,7 @@ def train(cfg: DictConfig) -> None:
         devices=torch.cuda.device_count(), 
         logger=wandb_logger, 
         # strategy="ddp",# if ddp else 'auto'
-        strategy=DDPStrategy(broadcast_buffers=False),
+        strategy=DDPStrategy(broadcast_buffers=~using_lang),
         callbacks=([EMA(0.9999)] * cfg.train.ema
                    +[ModelCheckpoint(dirpath=f'checkpoints/{wandb_logger.experiment.name}',
                                    save_on_train_epoch_end=False)]),

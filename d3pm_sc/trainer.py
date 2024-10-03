@@ -194,9 +194,9 @@ class DiffusionTrainer(pl.LightningModule):
                             joined_text_gen = ["\n\n".join(t) for t in gen_text]
                             wandb.log({"sample_text_process": wandb.Table(columns=["text"], data=[[jt] for jt in joined_text_gen])})
 
-    def on_fit_start(self):
-        if isinstance(self.logger, pl.loggers.WandbLogger):
-            wandb.config.update(self.hparams)
+    # def on_fit_start(self):
+    #     if isinstance(self.logger, pl.loggers.WandbLogger):
+    #         wandb.config.update(self.hparams)
 
     def on_before_optimizer_step(self, optimizer):
         # Gradient clipping
