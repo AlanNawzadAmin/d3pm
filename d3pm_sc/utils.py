@@ -66,9 +66,11 @@ def get_inf_gen(forward_kwargs, num_classes):
         V_inv = np.linalg.inv(V)
         evals = (l**forward_kwargs['alpha'])[None, :]
         cond_liks[:20, :20] = (V * evals) @ V_inv
+        cond_liks[cond_liks<0] = 0
         cond_liks = cond_liks / cond_liks.sum(-1)[:, None]
         L = torch.tensor(cond_liks - np.eye(len(cond_liks))).float()
         L[:20] /= forward_kwargs['alpha']
+        L[20:] *= - np.diagonal(L).min()
     if ("make_sym" in forward_kwargs.keys() and forward_kwargs['make_sym']):
         L = (L + L.T) / 2
         range_ = torch.arange(num_classes)

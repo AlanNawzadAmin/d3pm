@@ -175,7 +175,7 @@ class DiffusionTrainer(pl.LightningModule):
         }
         return loss_dict
 
-    @rank_zero_only
+    # @rank_zero_only
     def on_validation_epoch_end(self,):
         # generate image
         if self.sample_x is not None:

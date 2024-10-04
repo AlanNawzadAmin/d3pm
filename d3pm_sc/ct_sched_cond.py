@@ -103,9 +103,11 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, S).float()
         true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S)
         pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x_t, t, S)
-
+        print("true", torch.isnan(true_q_posterior_logits).sum())
+        print("pred", torch.isnan(true_q_posterior_logits).sum())
         # get kls and loss
         kl = kls(true_q_posterior_logits, pred_q_posterior_logits, self.eps) # shape x
+        print("kl", torch.isnan(kl).sum())
         if attn_mask is not None:
             kl = kl * attn_mask
         weight = - self.beta(t) / self.log_alpha(t)
