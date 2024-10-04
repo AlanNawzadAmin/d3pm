@@ -126,7 +126,7 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
                  - pred_r_posterior)
               + (true_r_posterior * torch.log(F.relu(true_r_posterior)+self.eps)
                  - true_r_posterior))
-        vb_loss = kl.sum(-1).mean() * self.t_max
+        vb_loss = (kl * (true_r_posterior>0)).sum(-1).mean() * self.t_max
 
         # Also calculate cross entropy loss
         predicted_x0_logits = predicted_x0_logits.flatten(start_dim=0, end_dim=-2)
@@ -142,6 +142,9 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         # predict prev(x_t) or x_{t-1}
         predicted_x0_logits = self.model_predict(x, t, cond if cond is not None else attn_mask,None)
         bwd_inf_gen = self.r_posterior(predicted_x0_logits, x, t,None)
+        bwd_inf_gen.scatter_(-1, x.unsqueeze(-1),
+                             - F.relu(bwd_inf_gen).sum(-1).unsqueeze(-1))
+        
         x_0_logits = convert_to_distribution(x, self.num_classes, self.eps)
         softmaxed = torch.softmax(x_0_logits, dim=-1)
         pred_r_posterior = torch.clip(softmaxed + delta_t * bwd_inf_gen, self.eps, 1.0)
