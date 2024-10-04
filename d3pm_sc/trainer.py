@@ -10,6 +10,7 @@ from torchvision.utils import make_grid
 import torch.nn.functional as F
 from tqdm import tqdm
 from .inception_score import inception_score
+from pytorch_lightning.utilities import rank_zero_only
 
 def get_gif(sample_x, sample_a, model, gen_trans_step, batch_size):
     # save images
@@ -174,6 +175,7 @@ class DiffusionTrainer(pl.LightningModule):
         }
         return loss_dict
 
+    @rank_zero_only
     def on_validation_epoch_end(self,):
         # generate image
         if self.sample_x is not None:

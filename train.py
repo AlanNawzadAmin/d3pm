@@ -95,18 +95,17 @@ def train(cfg: DictConfig) -> None:
         wandb.config.update(lightning_model.hparams)
     update_wandb_config()
 
-    # ddp = not cfg.model.model == "ScheduleConditionSparseK"
     if cfg.data.data == 'uniref50':
         val_check_interval = 5 * (210000//cfg.train.batch_size)
     else:
         val_check_interval = 1.0
+    print("broadcast buffer:", not using_lang)
     trainer = Trainer(
         max_epochs=cfg.train.n_epoch, 
         accelerator='auto', 
         devices=torch.cuda.device_count(), 
         logger=wandb_logger, 
-        # strategy="ddp",# if ddp else 'auto'
-        strategy=DDPStrategy(broadcast_buffers=~using_lang),
+        strategy=DDPStrategy(broadcast_buffers=not using_lang),
         callbacks=([EMA(0.9999)] * cfg.train.ema
                    +[ModelCheckpoint(dirpath=f'checkpoints/{wandb_logger.experiment.name}',
                                    save_on_train_epoch_end=False)]),

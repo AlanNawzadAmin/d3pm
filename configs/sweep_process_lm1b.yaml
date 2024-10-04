@@ -1,5 +1,5 @@
 program: train.py
-method: grid
+method: bayes
 command:
   - ${env}
   - python3
@@ -13,11 +13,15 @@ parameters:
   model.seed:
     value: 0
   model.forward_kwargs.uniform_rate:
-    values: [0.1, 0.2, 0.4]
+    distribution: log_uniform
+    min: 0.05
+    max: 1
   model.forward_kwargs.bandwidth:
-    values: [0.05, 1]
+    distribution: log_uniform
+    min: 0.05
+    max: 1
   model.forward_kwargs.knn:
-    value: 10
+    values: [5, 10, 20, 40, 80]
   model.eff_num_classes:
     values: [300, 1000, 3000, 10000]
 
