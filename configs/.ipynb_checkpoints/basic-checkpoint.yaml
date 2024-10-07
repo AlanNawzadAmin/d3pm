@@ -20,6 +20,7 @@ model:
     input_logits: false
     sedd_param: false
     eff_num_classes: 1000000
+    restart: false
 
 architecture:
     s_dim: 128

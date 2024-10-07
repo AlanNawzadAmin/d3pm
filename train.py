@@ -62,25 +62,30 @@ def train(cfg: DictConfig) -> None:
                        "DiscreteScheduleCondition":DiscreteScheduleCondition,
                        "D3PMClassic":D3PMClassic}
     using_lang = cfg.model.model == "ScheduleConditionSparseK"
-    model = model_name_dict[cfg.model.model](
-        x0_model_class,
-        nn_params,
-        num_classes=len(tokenizer) if tokenizer else cfg.data.N,
-        hybrid_loss_coeff=cfg.model.hybrid_loss_coeff,
-        gamma=cfg.model.gamma,
-        forward_kwargs=OmegaConf.to_container(cfg.model.forward_kwargs, resolve=True),
-        schedule_type=cfg.model.schedule_type,
-        logistic_pars=cfg.model.logistic_pars,
-        fix_x_t_bias=cfg.model.fix_x_t_bias,
-        n_T=cfg.model.n_T,
-        t_max=cfg.model.t_max,
-        seed=cfg.model.seed,
-        sedd_param=cfg.model.sedd_param,
-        eff_num_classes=cfg.model.eff_num_classes,
-        input_logits=cfg.model.input_logits,
-        tokenizer=tokenizer if cfg.data.data != 'uniref50' else Tokenizer(),
-        **OmegaConf.to_container(cfg.train, resolve=True),
-    )
+    if not cfg.model.restart:
+        model = model_name_dict[cfg.model.model](
+            x0_model_class,
+            nn_params,
+            num_classes=len(tokenizer) if tokenizer else cfg.data.N,
+            hybrid_loss_coeff=cfg.model.hybrid_loss_coeff,
+            gamma=cfg.model.gamma,
+            forward_kwargs=OmegaConf.to_container(cfg.model.forward_kwargs, resolve=True),
+            schedule_type=cfg.model.schedule_type,
+            logistic_pars=cfg.model.logistic_pars,
+            fix_x_t_bias=cfg.model.fix_x_t_bias,
+            n_T=cfg.model.n_T,
+            t_max=cfg.model.t_max,
+            seed=cfg.model.seed,
+            sedd_param=cfg.model.sedd_param,
+            eff_num_classes=cfg.model.eff_num_classes,
+            input_logits=cfg.model.input_logits,
+            tokenizer=tokenizer if cfg.data.data != 'uniref50' else Tokenizer(),
+            **OmegaConf.to_container(cfg.train, resolve=True),
+        )
+        ckpt_path = None
+    else:
+        model = model_name_dict[cfg.model.model].load_from_checkpoint(cfg.model.restart)
+        ckpt_path = cfg.model.restart
 
     ##### Load data
     model.pre_configure_model(train_dataloader)
@@ -110,9 +115,9 @@ def train(cfg: DictConfig) -> None:
                    +[ModelCheckpoint(dirpath=f'checkpoints/{wandb_logger.experiment.name}',
                                    save_on_train_epoch_end=False)]),
         val_check_interval=val_check_interval,
-        accumulate_grad_batches=cfg.train.accumulate
+        accumulate_grad_batches=cfg.train.accumulate,
     )
-    trainer.fit(lightning_model, train_dataloader, test_dataloader)
+    trainer.fit(lightning_model, train_dataloader, test_dataloader, ckpt_path=ckpt_path)
     wandb.finish()
 
 if __name__ == "__main__":
