@@ -16,6 +16,7 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
+import pytorch_lightning as pl
 
 from evodiff.utils import Tokenizer
 
@@ -45,8 +46,7 @@ def train(cfg: DictConfig) -> None:
         wandb.init()
     init_wandb()
     ##### Load data
-    if torch.cuda.device_count() <= 1:
-        torch.manual_seed(cfg.model.seed)
+    pl.seed_everything(cfg.model.seed, workers=True)
     train_dataloader, test_dataloader = get_dataloaders(cfg)
     tokenizer = train_dataloader.tokenizer if hasattr(train_dataloader, "tokenizer") else None
 

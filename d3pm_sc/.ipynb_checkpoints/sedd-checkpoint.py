@@ -30,7 +30,7 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         # Get L
         L = get_inf_gen(forward_kwargs, num_classes)
         self.register_buffer("L", L)
-        eigenvalues, eigenvectors = torch.linalg.eig(L)
+        eigenvalues, eigenvectors = torch.linalg.eig(L.double())
         eigenvalues[torch.real(eigenvalues) > -self.eps] = 0
         eigenvectors_inv = torch.linalg.inv(eigenvectors)
         self.register_buffer("eigenvalues", eigenvalues)
@@ -65,8 +65,9 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         assert torch.all(stationary >= 0)
         return stationary / stationary.sum()
 
-    def get_trans_mat(self, t):
-        return torch.matrix_exp(- self.log_alpha(t)[..., None, None] * self.L)
+    # def get_trans_mats_mvp2(self, t, v):
+    #     mat = torch.matrix_exp(- self.log_alpha(t)[..., None, None] * self.L)
+    #     return torch.einsum("b...c,bcd->b...d", v, mat)
 
     def get_trans_mats_mvp(self, t, v):
         # 
@@ -75,7 +76,7 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         diag = torch.exp(-self.log_alpha(t)[..., None] * self.eigenvalues)
         dv = dv @ self.eigenvectors
         dv = dv * diag.unsqueeze(-2)
-        return (dv @ self.eigenvectors_inv).real.float().reshape(v.shape)
+        return (dv @ self.eigenvectors_inv).float().reshape(v.shape)
 
     def get_kl_t1(self, x):
         # sample S
