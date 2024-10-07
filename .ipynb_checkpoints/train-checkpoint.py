@@ -1,4 +1,6 @@
 import sys
+import os
+import glob
 import numpy as np
 import torch
 import torch.nn as nn
@@ -30,7 +32,6 @@ from ema import EMA
 
 import getpass
 
-import os
 import certifi
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
@@ -84,8 +85,9 @@ def train(cfg: DictConfig) -> None:
         )
         ckpt_path = None
     else:
-        model = model_name_dict[cfg.model.model].load_from_checkpoint(cfg.model.restart)
-        ckpt_path = cfg.model.restart
+        ckpt_path = f'checkpoints/{cfg.model.restart}'
+        ckpt_path = max(glob.glob(os.path.join(ckpt_path, '*.ckpt')), key=os.path.getmtime)
+        model = model_name_dict[cfg.model.model].load_from_checkpoint(ckpt_path)
 
     ##### Load data
     model.pre_configure_model(train_dataloader)
