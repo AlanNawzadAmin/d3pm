@@ -65,7 +65,7 @@ def get_L_and_K(forward_kwargs, gamma, inds=None):
         # rates = distances.sum(-1)
         # assert (dot_products > 0).all()
         not_diag = row_indices != col_indices
-        row_indices, col_indices = row_indices[not_diag], col_indices[not_diag]
+        row_indices, col_indices, dot_products = row_indices[not_diag], col_indices[not_diag], dot_products[not_diag]
         # assert (row_indices != col_indices).all()
         if forward_kwargs['make_sym']:
             row_indices, col_indices = np.r_[row_indices, col_indices], np.r_[col_indices, row_indices]
