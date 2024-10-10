@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from tqdm import tqdm
 import math
 import time
@@ -31,11 +32,18 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         self.input_logits = input_logits
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
-        # Precalculate Ks
+        # Precalculate Ls
         L = get_inf_gen(forward_kwargs, num_classes)
+        # Get Ks
         rate = - (L.diagonal().min()) / (1-gamma) # L^* in sec 6.6 of the notes
         K = L / rate + torch.eye(num_classes)
         self.rate = rate
+        eigenvalues, eigenvectors = torch.linalg.eig(K.double())
+        eigenvalues[torch.real(eigenvalues) > 1-self.eps] = 1
+        eigenvectors_inv = torch.linalg.inv(eigenvectors)
+        self.register_buffer("eigenvalues", eigenvalues)
+        self.register_buffer("eigenvectors", eigenvectors)
+        self.register_buffer("eigenvectors_inv", eigenvectors_inv)
         
         # Precalculate K_powers
         num_powers = 5000
@@ -65,16 +73,31 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         else:
             x_0_logits = torch.log(self.K_powers[S, :, x_t] + self.eps)
             return self.x0_model(x_0_logits, t, cond, S).float()
+            
+    # def get_trans_mats_mvp2(self, Smk, v):
+    #     # 
+    #     """ v is a ...c matrix where K is cd, and Smk is ... """
+    #     trans_mats = self.K_powers[Smk, :, :] # make sure we ignore S=0 later!
+    #     dv = torch.einsum("b...c,b...cd->b...d", v, trans_mats)
+    #     return dv
 
+    def get_trans_mats_mvp(self, Smk, v):
+        """ v is a ...c matrix where K is cd, and Smk is ... """
+        dv = v.to(dtype=self.eigenvectors.dtype).reshape(-1, v.shape[-1])
+        diag = self.eigenvalues ** F.relu(Smk.flatten()[..., None])
+        dv = dv @ self.eigenvectors
+        dv = dv * diag
+        return (dv @ self.eigenvectors_inv).float().reshape(v.shape)
+    
     def get_kl_t1(self, x):
         # sample S
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
         S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
         S = S.swapaxes(0, 1).reshape(*x.shape).long()
         x_0_logits = convert_to_distribution(x, self.num_classes, self.eps)
-        trans_mats = self.K_powers[S, :, :]
         softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
-        x_1 = torch.log(torch.einsum("b...c,b...cd->b...d", softmaxed, trans_mats)+self.eps)
+        trans = self.get_trans_mats_mvp(S, softmaxed)
+        x_1 = torch.log(trans+self.eps)
         kl = kls(x_1, torch.log(self.get_stationary() + self.eps), self.eps)
         return kl.mean()
 
@@ -89,11 +112,10 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         """ probs for x_{t-k}|x_t, x_0 """
         x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
         fact1 = self.K_powers.swapaxes(1, 2)[k, x_t, :] # x_t | x_{t-1}
-        trans_mats = self.K_powers[S - k, :, :] # make sure we ignore S=0 later!
         if self.fix_x_t_bias:
             x_0_logits -= torch.log(self.K_powers[S, :, x_t] + self.eps) # x_{t} | x_{0}
         softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
-        fact2 = torch.einsum("b...c,b...cd->b...d", softmaxed, trans_mats) # x_{t-1} | x_{0}
+        fact2 = self.get_trans_mats_mvp(S - k, softmaxed) # x_{t-1} | x_{0}
         out = torch.log(fact1 + self.eps) + torch.log(fact2 + self.eps)
         return out
 
