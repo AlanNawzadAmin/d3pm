@@ -36,7 +36,7 @@ class MaskingDiffusion(ScheduleCondition): #schedule conditioning is True!
         # so we always assume S==1.
         # in principle we could also speed up sampling by ignoring S>1
 
-    def model_predict(self, x_t, t, cond, S):
+    def base_predict(self, x_t, t, cond, S):
         masked_pos = S > 0
         masked_x_t = torch.where(masked_pos, self.num_classes, x_t)
         return self.x0_model(masked_x_t, t, cond, S=S)[..., :-1]
@@ -44,26 +44,30 @@ class MaskingDiffusion(ScheduleCondition): #schedule conditioning is True!
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask: torch.Tensor = None) -> torch.Tensor:
         t, S, x_t = self.sample_point(x)
         S = (S>0).long()
-        
         # predict x_0 and prev(x_t)
-        # if self.use_bad_model_predict:
-        #     predicted_x0_logits = self.bad_model_predict(x_t, t, cond if cond is not None else attn_mask, S)
-        # else:
-        predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, S)
+        predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, S).float()
         true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S)
         pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x_t, t, S)
 
         # get kls and loss
         kl = kls(true_q_posterior_logits, pred_q_posterior_logits, self.eps) # shape x
+        if attn_mask is not None:
+            kl = kl * attn_mask
         alpha_t = torch.exp(self.log_alpha(t))
         weight = self.beta(t) * alpha_t / (1 - alpha_t) #mult by p(S=1|t)
         weight = (S.swapaxes(0, -1) * weight).swapaxes(0, -1)
         vb_loss = (kl * weight).mean() * self.t_max
+        if attn_mask is not None:
+            vb_loss = vb_loss / attn_mask.mean()
 
         # Also calculate cross entropy loss
         predicted_x0_logits = predicted_x0_logits.flatten(start_dim=0, end_dim=-2)
         x = x.flatten(start_dim=0, end_dim=-1)
-        ce_loss = torch.nn.CrossEntropyLoss()(predicted_x0_logits, x)
+        ce_loss = torch.nn.CrossEntropyLoss(reduction='none')(predicted_x0_logits, x)
+        if attn_mask is not None:
+            ce_loss = (ce_loss * attn_mask.flatten()).sum() / attn_mask.sum()
+        else:
+            ce_loss = ce_loss.mean()
 
         return self.hybrid_loss_coeff * ce_loss + vb_loss, {
             "vb_loss": vb_loss.detach().item(),
@@ -72,9 +76,8 @@ class MaskingDiffusion(ScheduleCondition): #schedule conditioning is True!
 
     def sample_sequence(self, x, cond=None, attn_mask=None, n_T=200, stride=10):
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
-        S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
         t = t * 0 + 1e-6
-        S = (S>0).swapaxes(0, 1).reshape(*x.shape).long() # this is the only line changed
+        S = (1. + 0. * x).long() # this is the only line changed
         steps = 0
         images = []
         n_steps = torch.tensor([S[b].sum() for b in range(len(S))]).max().item()
@@ -91,9 +94,10 @@ class MaskingDiffusion(ScheduleCondition): #schedule conditioning is True!
                 trans_indices = trans_indices[torch.randperm(len(trans_indices))]
                 if len(trans_indices) > 0:
                     # randomly transiiton
-                    for i, j, k in trans_indices[:trans_step]:
-                        x[b, i, j, k] = x_next[b, i, j, k]
-                        S[b, i, j, k] -= 1
+                    for idx in trans_indices[:trans_step]:
+                        idx_tuple = (b,) + tuple(idx)
+                        x[idx_tuple] = x_next[idx_tuple]
+                        S[idx_tuple] -= 1
             pbar.update(trans_step)
             steps += 1
             if steps % stride == 0:

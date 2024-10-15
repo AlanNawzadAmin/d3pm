@@ -106,33 +106,31 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         return ratios
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask=None, *args) -> torch.Tensor:
-        # t0 = time.time()
         t, _, x_t = self.sample_point(x)
-        # print("sample time:", time.time()-t0)
-        # predict x_0 and prev(x_t)
-        # t0 = time.time()
-        # print(x_t.shape, t.shape, cond.shape)
         predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, None)
-        # print("pred time:", time.time() - t0)
-        # t0 = time.time()
         true_r_posterior = self.r_posterior(x, x_t, t, None)
         pred_r_posterior = self.r_posterior(predicted_x0_logits, x_t, t, None)
-        # print("pred time:", time.time() - t0)
-        # t0 = time.time()
-        # self.log_alpha(t)
-        # print("pred time:", time.time() - t0)
 
         # get kls and loss
         kl = (- (true_r_posterior * torch.log(F.relu(pred_r_posterior)+self.eps)
                  - pred_r_posterior)
               + (true_r_posterior * torch.log(F.relu(true_r_posterior)+self.eps)
                  - true_r_posterior))
-        vb_loss = (kl * (true_r_posterior>0)).sum(-1).mean() * self.t_max
+        kl = (kl * (true_r_posterior>0)).sum(-1)
+        if attn_mask is not None:
+            kl = kl * attn_mask
+        vb_loss = kl.mean() * self.t_max
+        if attn_mask is not None:
+            vb_loss = vb_loss / attn_mask.mean()
 
         # Also calculate cross entropy loss
         predicted_x0_logits = predicted_x0_logits.flatten(start_dim=0, end_dim=-2)
         x = x.flatten(start_dim=0, end_dim=-1)
-        ce_loss = torch.nn.CrossEntropyLoss()(predicted_x0_logits, x)
+        ce_loss = torch.nn.CrossEntropyLoss(reduction='none')(predicted_x0_logits, x)
+        if attn_mask is not None:
+            ce_loss = (ce_loss * attn_mask.flatten()).sum() / attn_mask.sum()
+        else:
+            ce_loss = ce_loss.mean()
 
         return self.hybrid_loss_coeff * ce_loss + vb_loss, {
             "vb_loss": vb_loss.detach().item(),

@@ -58,6 +58,7 @@ def get_model_setup(cfg, tokenizer=None):
         
     elif cfg.architecture.x0_model_class in protein_nn_name_dict:
         nn_params = {
+            "n_tokens": cfg.data.N + (cfg.model.model == 'MaskingDiffusion'),
             "schedule_conditioning": schedule_conditioning,
             **nn_params
         }
