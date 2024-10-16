@@ -65,7 +65,7 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         assert torch.all(stationary >= 0)
         return stationary / stationary.sum()
 
-    # def get_trans_mats_mvp2(self, t, v):
+    # def get_trans_mats_mvp(self, t, v):
     #     mat = torch.matrix_exp(- self.log_alpha(t)[..., None, None] * self.L)
     #     return torch.einsum("b...c,bcd->b...d", v, mat)
 
@@ -83,9 +83,9 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
         x_0_logits = convert_to_distribution(x, self.num_classes, self.eps)
         softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
-        x_1 = self.get_trans_mats_mvp(t, softmaxed)
+        x_1 = torch.log(self.get_trans_mats_mvp(t, softmaxed)+self.eps)
         # x_1 = torch.log(torch.einsum("b...c,bcd->b...d", softmaxed, self.get_trans_mats(t)))
-        kl = kls(x_1, self.get_stationary(), self.eps)
+        kl = kls(x_1, torch.log(self.get_stationary() + self.eps), self.eps)
         return kl.mean()
 
     def x_t_sample(self, x_0, t, noise, S):
@@ -99,14 +99,15 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
         softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
         p_y = self.get_trans_mats_mvp(t, softmaxed)
-        # p_y = torch.einsum("b...c,bcd->b...d", softmaxed, self.get_trans_mats(t))
         p_xt = p_y.gather(-1, x_t.unsqueeze(-1)).squeeze(-1)
         ratios = (p_y + self.eps)/(p_xt[..., None] + self.eps)
         ratios = ((ratios * self.L.T[x_t, :]).transpose(0, -1) * self.beta(t)).transpose(0, -1)
         return ratios
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask=None, *args) -> torch.Tensor:
-        t, _, x_t = self.sample_point(x)
+        t, S, x_t = self.sample_point(x)
+        print(S.float().mean())
+        # predict x_0 and prev(x_t)
         predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, None)
         true_r_posterior = self.r_posterior(x, x_t, t, None)
         pred_r_posterior = self.r_posterior(predicted_x0_logits, x_t, t, None)
@@ -116,22 +117,23 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
                  - pred_r_posterior)
               + (true_r_posterior * torch.log(F.relu(true_r_posterior)+self.eps)
                  - true_r_posterior))
-        kl = (kl * (true_r_posterior>0)).sum(-1)
+        kl = (kl * (true_r_posterior>=0)).sum(-1)
         if attn_mask is not None:
             kl = kl * attn_mask
         vb_loss = kl.mean() * self.t_max
         if attn_mask is not None:
             vb_loss = vb_loss / attn_mask.mean()
+        print(vb_loss)
 
         # Also calculate cross entropy loss
         predicted_x0_logits = predicted_x0_logits.flatten(start_dim=0, end_dim=-2)
         x = x.flatten(start_dim=0, end_dim=-1)
         ce_loss = torch.nn.CrossEntropyLoss(reduction='none')(predicted_x0_logits, x)
+        print(ce_loss.mean())
         if attn_mask is not None:
             ce_loss = (ce_loss * attn_mask.flatten()).sum() / attn_mask.sum()
         else:
             ce_loss = ce_loss.mean()
-
         return self.hybrid_loss_coeff * ce_loss + vb_loss, {
             "vb_loss": vb_loss.detach().item(),
             "ce_loss": ce_loss.detach().item(),

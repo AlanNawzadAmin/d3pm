@@ -121,6 +121,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask=None,) -> torch.Tensor:
         t, S, x_t = self.sample_point(x)
+        print(S.float().mean())
         # predict x_0 and prev(x_t)
         predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, S).float()
         true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S)

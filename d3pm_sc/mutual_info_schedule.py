@@ -30,8 +30,9 @@ def try_load(func, fname, path='/scratch/aa11803/d3pm/save_alphas/'):
     return val
 
 def get_a_b_func_cont(L, p0, **kwargs):
+    N = len(p0)
     ent_p0 = -torch.xlogy(p0, p0).sum()
-    evals, V = torch.linalg.eig(L)
+    evals, V = torch.linalg.eig(L.double())
     evals[torch.real(evals) > -1e-6] = 0
     second_eval = torch.real(evals)
     second_eval = -second_eval.sort().values[-2]
@@ -41,13 +42,13 @@ def get_a_b_func_cont(L, p0, **kwargs):
         evals_skew = torch.exp(t[:, None, None] * evals[None, None, :])
         too_big = torch.real(evals_skew * evals_skew.conj()) > 1
         evals_skew = torch.where(too_big, 1, evals_skew)
-        mat = torch.where((t > 1e-3)[:, None, None],
+        mat = torch.where((t > 1e-5)[:, None, None],
                           torch.real((V[None,:, :] * evals_skew) @ V_inv), 
                           torch.eye(len(L)) + t[:, None, None] * L) # stable for small t
         p = p0[None, :, None] * mat
         p = torch.where(p < 1e-12, 0, p)
         mi_m1 = (torch.xlogy(p, p).sum(-1) - torch.xlogy(p.sum(-2), p.sum(-2))).sum(-1) / ent_p0
-        return mi_m1 + t_shift
+        return (mi_m1 + t_shift).float()
 
     base_ts = torch.linspace(0., 0.9991, 1000000) 
     def log_alpha_naive(ts, bs=1000):
@@ -61,8 +62,11 @@ def get_a_b_func_cont(L, p0, **kwargs):
         # out = root_finder(mi, 0, 20/second_eval, ts)
         return -torch.where(out>1e-6, out, 1e-6)
     hash_mat = hash_matrix(L)
-    try_load(lambda : L, f'{hash_mat}_mat.npy')
-    base_alphas = try_load(lambda: -log_alpha_naive(base_ts), f'{hash_mat}.npy')
+    if N > 100:
+        try_load(lambda : L, f'{hash_mat}_mat.npy')
+        base_alphas = try_load(lambda: -log_alpha_naive(base_ts), f'{hash_mat}.npy')
+    else:
+        base_alphas = -log_alpha_naive(base_ts)
     def log_alpha(ts):
         closest_index = torch.searchsorted(base_ts, ts.to('cpu'))
         best_guess_l = base_alphas[closest_index]
@@ -80,7 +84,10 @@ def get_a_b_func_cont(L, p0, **kwargs):
             out_tensor = -log_alpha(batch.to('cpu'))
             grad.append(-1 / torch.func.grad(lambda o: mi(o).sum())(out_tensor))
         return torch.cat(grad).to(ts.device)
-    base_betas = try_load(lambda: naive_beta(base_ts), f'{hash_mat}_beta.npy')
+    if N > 100:
+        base_betas = try_load(lambda: naive_beta(base_ts), f'{hash_mat}_beta.npy')
+    else:
+        base_betas = naive_beta(base_ts)
     def beta(ts):
         closest_index = torch.searchsorted(base_ts, ts.to('cpu'))
         best_guess_l = base_betas[closest_index]
@@ -91,7 +98,8 @@ def get_a_b_func_cont(L, p0, **kwargs):
 
 def get_a_b_func_sc(K, p0, precompute_mis=None, second_eval=None, **kwargs):
     if second_eval is None:
-        evals, V = torch.linalg.eig(K - torch.eye(len(K), dtype=K.dtype))
+        L_ish = K.double() - torch.eye(len(K), dtype=torch.float64)
+        evals, V = torch.linalg.eig(L_ish)
         evals[torch.real(evals) > -1e-6] = 0
         second_eval = torch.real(evals)
         second_eval = -second_eval.sort().values[-2]
@@ -106,7 +114,7 @@ def get_a_b_func_sc(K, p0, precompute_mis=None, second_eval=None, **kwargs):
                 mat = torch.eye(len(K), dtype=K.dtype)
             p = p0[:, None] * mat
             p = torch.where(p < 0, 0, p)
-            return (torch.xlogy(p, p).sum(-1) - torch.xlogy(p.sum(-2), p.sum(-2))).sum(-1) / ent_p0 + 1
+            return ((torch.xlogy(p, p).sum(-1) - torch.xlogy(p.sum(-2), p.sum(-2))).sum(-1) / ent_p0 + 1).float()
         precompute_mis = [mi_p(n) for n in range(max_n)]
     precompute_mis = torch.tensor(precompute_mis)
     precompute_mis = torch.maximum(precompute_mis, torch.zeros(1))
