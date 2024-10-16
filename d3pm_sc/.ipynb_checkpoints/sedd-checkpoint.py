@@ -36,18 +36,6 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         self.register_buffer("eigenvalues", eigenvalues)
         self.register_buffer("eigenvectors", eigenvectors)
         self.register_buffer("eigenvectors_inv", eigenvectors_inv)
-        # Get Ks just for fast sampling
-        gamma = 0
-        rate = - (L.diagonal().min()) / (1-gamma)
-        K = L / rate + torch.eye(num_classes)
-        self.rate = rate
-        
-        # Precalculate K_powers
-        num_powers = 5000
-        assert (num_classes <= 512 and forward_kwargs['type'] != "bert_embed")
-        K_powers = torch.stack([torch.linalg.matrix_power(K, i) for i in tqdm(range(5000), desc="Making K powers")])
-        self.register_buffer("K", K)
-        self.register_buffer("K_powers", K_powers)
 
     def pre_configure_model(self, dataloader):
         self.calc_p0(dataloader)
@@ -78,19 +66,25 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         dv = dv * diag.unsqueeze(-2)
         return (dv @ self.eigenvectors_inv).float().reshape(v.shape)
 
+    def get_trans_mats_index(self, t, ind):
+        # 
+        """ ind is a b... matrix of indices up to c where L is cd, and t is b """
+        dind = ind.reshape(ind.shape[0], -1)
+        diag = torch.exp(-self.log_alpha(t)[..., None] * self.eigenvalues)
+        dv = self.eigenvectors[dind, :]
+        dv = dv * diag.unsqueeze(-2)
+        return (dv @ self.eigenvectors_inv).float().reshape(ind.shape+(self.num_classes,))
+
     def get_kl_t1(self, x):
         # sample S
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
-        x_0_logits = convert_to_distribution(x, self.num_classes, self.eps)
-        softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
-        x_1 = torch.log(self.get_trans_mats_mvp(t, softmaxed)+self.eps)
-        # x_1 = torch.log(torch.einsum("b...c,bcd->b...d", softmaxed, self.get_trans_mats(t)))
+        x_1 = torch.log(self.get_trans_mats_index(t, x)+self.eps)
         kl = kls(x_1, torch.log(self.get_stationary() + self.eps), self.eps)
         return kl.mean()
 
     def x_t_sample(self, x_0, t, noise, S):
         # forward process, x_0 is the clean input.
-        logits = torch.log(self.K_powers[S, x_0, :] + self.eps)
+        logits = torch.log(self.get_trans_mats_index(t, x_0)+self.eps)
         noise = torch.clip(noise, self.eps, 1.0)
         gumbel_noise = -torch.log(-torch.log(noise))
         return torch.argmax(logits + gumbel_noise, dim=-1)
