@@ -1,0 +1,37 @@
+program: train.py
+method: grid
+command:
+  - ${env}
+  - torchrun
+  - --standalone
+  - --nproc_per_node=2
+  - ${program}
+  - --config-name=basic_protein
+  - ${args_no_hyphens}
+metric:
+  name: val_l01
+  goal: minimize
+parameters:
+  model.seed:
+    value: 0
+  model.forward_kwargs.alpha:
+    value: 1
+  model.forward_kwargs.beta:
+    value: 2.5
+  model.gamma:
+    values: [0.05, 0.3, 0.4, 0.5]
+  model.forward_kwargs.normalized:
+    values: [true, false]
+  model.forward_kwargs.make_sym:
+    value: false
+  model.model:
+    values:
+    - ScheduleCondition
+  train.pack:
+    value: true
+  train.batch_size:
+    value: 64
+  train.n_epoch:
+    value: 10
+  train.accumulate:
+    value: 1

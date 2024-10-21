@@ -1,0 +1,38 @@
+command:
+  - ${env}
+  - torchrun
+  - --standalone
+  - --nproc_per_node=2
+  - ${program}
+  - ${args_no_hyphens}
+method: grid
+metric:
+  goal: minimize
+  name: val_l01
+parameters:
+  architecture.nn_params.n_layers:
+    value: 32
+  architecture.nn_params.time_embed_dim:
+    value: 512
+  data.N:
+    value: 256
+  data.data:
+    value: CIFAR10
+  model.forward_kwargs.type:
+    value: uniform
+  model.model:
+    values:
+    - SEDD
+  model.seed:
+    value: 0
+  train.accumulate:
+    value: 1
+  train.batch_size:
+    value: 64
+  train.ema:
+    value: false
+  train.gen_trans_step:
+    value: 10
+  train.n_epoch:
+    value: 10000
+program: train.py

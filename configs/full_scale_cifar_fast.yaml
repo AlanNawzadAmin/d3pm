@@ -1,0 +1,43 @@
+program: train.py
+method: grid
+command:
+  - ${env}
+  - torchrun
+  - --standalone
+  - --nproc_per_node=2
+  - ${program}
+  - ${args_no_hyphens}
+metric:
+  name: val_l01
+  goal: minimize
+parameters:
+  model.restart:
+    value: ethereal-sweep-1
+  data.data:
+    value: CIFAR10
+  data.N:
+    value: 256
+  model.seed:
+    value: 0
+  model.forward_kwargs.type:
+      value: gaussian
+  model.forward_kwargs.normalized:
+    value: false
+  model.forward_kwargs.bandwidth:
+      value: 0.05
+  architecture.nn_params.s_embed_dim:
+    value: 128
+  model.gamma:
+    value: 0.0
+  architecture.nn_params.n_layers:
+    value: 32
+  train.batch_size:
+    value: 64
+  train.accumulate:
+    value: 1
+  train.n_epoch:
+    value: 10000
+  train.gen_trans_step:
+    value: 32
+  train.ema:
+    value: false

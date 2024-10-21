@@ -1,0 +1,32 @@
+program: train.py
+method: bayes
+command:
+  - ${env}
+  - python3
+  - ${program}
+  - --config-name=basic_protein
+  - ${args_no_hyphens}
+metric:
+  name: val_l01
+  goal: minimize
+parameters:
+  model.seed:
+    value: 0
+  model.forward_kwargs.alpha:
+    value: 0.0001
+  model.forward_kwargs.beta:
+    value: 1
+  model.gamma:
+    values: [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.6, 0.8]
+  model.forward_kwargs.normalized:
+    values: [false]
+  model.forward_kwargs.make_sym:
+    value: false
+  train.accumulate:
+    value: 1
+  train.pack:
+    values: [true]
+  train.batch_size:
+    value: 128
+  train.n_epoch:
+    value: 3

@@ -1,0 +1,41 @@
+program: train.py
+method: grid
+command:
+  - ${env}
+  - torchrun
+  - --standalone
+  - --nproc_per_node=2
+  - ${program}
+  - --config-name=basic_protein
+  - ${args_no_hyphens}
+metric:
+  name: val_l01
+  goal: minimize
+parameters:
+  model.seed:
+    value: 0
+  model.forward_kwargs.alpha:
+    value: 0.0001
+  model.forward_kwargs.beta:
+    value: 1
+  model.gamma:
+    value: 0.05
+  model.forward_kwargs.normalized:
+    values: [false]
+  model.forward_kwargs.make_sym:
+    value: false
+  model.model:
+    values:
+    - ScheduleCondition
+    - MaskingDiffusion
+    - SEDD
+  train.pack:
+    value: true
+  architecture.x0_model_class:
+    value: DIT
+  train.batch_size:
+    value: 64
+  train.n_epoch:
+    value: 100
+  train.accumulate:
+    value: 1
