@@ -31,8 +31,12 @@ def get_L_and_K(forward_kwargs, gamma, inds=None):
             tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
         elif forward_kwargs['tokenizer'] == 'gpt2':
             tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
+            if tokenizer.pad_token is None:
+                tokenizer.add_special_tokens({'pad_token': '[PAD]'})
             embeds = GPT2LMHeadModel.from_pretrained('gpt2').lm_head.weight
-        vocab = np.array(list(tokenizer.get_vocab().keys()))
+            embeds = torch.concat([embeds, torch.randn(1, embeds.shape[1], dtype=embeds.dtype, device=embeds.device)])            
+
+        vocab = np.array([tokenizer.decode(i) for i in torch.arange(len(tokenizer))])
         embeds = embeds.detach().cpu().numpy()
         if inds is not None:
             vocab = vocab[inds]

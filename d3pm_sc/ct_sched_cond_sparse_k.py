@@ -40,6 +40,7 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         self.cache_fact2 = True
         self.sedd_param = sedd_param
         self.eff_num_classes = min([eff_num_classes, num_classes])
+        print([eff_num_classes, num_classes])
         self.forward_kwargs = forward_kwargs
         self.gamma = gamma
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
