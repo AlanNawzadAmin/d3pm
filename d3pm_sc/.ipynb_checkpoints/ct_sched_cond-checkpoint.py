@@ -108,16 +108,18 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         gumbel_noise = -torch.log(-torch.log(noise))
         return torch.argmax(logits + gumbel_noise, dim=-1)
 
-    def q_posterior_logits(self, x_0, x_t, t, S, k=1):
+    def q_posterior_logits(self, x_0, x_t, t, S, k=1, log=True):
         """ probs for x_{t-k}|x_t, x_0 """
-        x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
         fact1 = self.K_powers.swapaxes(1, 2)[k, x_t, :] # x_t | x_{t-1}
+        x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
         if self.fix_x_t_bias:
             x_0_logits -= torch.log(self.K_powers[S, :, x_t] + self.eps) # x_{t} | x_{0}
         softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
         fact2 = self.get_trans_mats_mvp(S - k, softmaxed) # x_{t-1} | x_{0}
-        out = torch.log(fact1 + self.eps) + torch.log(fact2 + self.eps)
-        return out
+        if log:
+            return torch.log(fact1 + self.eps) + torch.log(fact2 + self.eps)
+        else:
+            return fact1 * fact2
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask=None,) -> torch.Tensor:
         t, S, x_t = self.sample_point(x)

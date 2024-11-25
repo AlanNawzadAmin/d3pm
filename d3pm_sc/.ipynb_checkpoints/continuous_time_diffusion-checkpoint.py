@@ -92,12 +92,12 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
     def p_sample(self, x, t, cond, attn_mask, noise, S=None, k=1, temperature=1):
         # predict prev(x_t) or x_{t-1}
         predicted_x0_logits = self.model_predict(x, t, cond if cond is not None else attn_mask, S) / temperature
-        pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x, t, S, k=k)
+        pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x, t, S, k=k, log=False)
         # sample
-        noise = torch.clip(noise, self.eps, 1.0-self.eps)
-        gumbel_noise = -torch.log(-torch.log(noise))
+        noise = torch.clip(noise, self.eps, 1.0)
+        gumbel_noise = 1 / (-torch.log(noise))
         sample = torch.argmax(
-            pred_q_posterior_logits + gumbel_noise, dim=-1
+            pred_q_posterior_logits * gumbel_noise, dim=-1
         )
         return sample
 

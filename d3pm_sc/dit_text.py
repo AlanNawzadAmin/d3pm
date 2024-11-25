@@ -236,8 +236,8 @@ class DDiTBlock(nn.Module):
     self.dropout = dropout
 
     self.adaLN_modulation = nn.Linear(cond_dim, 6 * dim, bias=True)
-    self.adaLN_modulation.weight.data.zero_()
-    self.adaLN_modulation.bias.data.zero_()
+    # self.adaLN_modulation.weight.data.zero_()
+    # self.adaLN_modulation.bias.data.zero_()
 
 
   def _get_bias_dropout_scale(self):
@@ -324,8 +324,8 @@ class DDitFinalLayer(nn.Module):
     self.adaLN_modulation = nn.Linear(cond_dim,
                                       2 * hidden_size,
                                       bias=True)
-    self.adaLN_modulation.weight.data.zero_()
-    self.adaLN_modulation.bias.data.zero_()
+    # self.adaLN_modulation.weight.data.zero_()
+    # self.adaLN_modulation.bias.data.zero_()
 
 
   def forward(self, x, c):
