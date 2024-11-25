@@ -1,11 +1,8 @@
 program: train.py
 method: grid
 command:
-  - ${env}
-  - torchrun
-  - --standalone
-  - --nproc_per_node=2
-  - ${program}
+  - python3
+  - train.py
   - --config-name=basic_protein
   - ${args_no_hyphens}
 metric:
@@ -15,13 +12,13 @@ parameters:
   model.seed:
     value: 0
   model.forward_kwargs.alpha:
-    value: 1
+    values: [1]
   model.forward_kwargs.beta:
-    value: 2.5
+    value: 1.5
   model.gamma:
-    values: [0.05, 0.3, 0.4, 0.5]
+    values: [0.00001, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
   model.forward_kwargs.normalized:
-    values: [true, false]
+    values: [false]
   model.forward_kwargs.make_sym:
     value: false
   model.model:
@@ -32,6 +29,6 @@ parameters:
   train.batch_size:
     value: 64
   train.n_epoch:
-    value: 10
+    value: 3
   train.accumulate:
     value: 1

@@ -47,10 +47,12 @@ def train(cfg: DictConfig) -> None:
     init_wandb()
     ##### Load data
     pl.seed_everything(cfg.model.seed, workers=True)
+    print("Getting dataloaders.")
     train_dataloader, test_dataloader = get_dataloaders(cfg)
     tokenizer = train_dataloader.tokenizer if hasattr(train_dataloader, "tokenizer") else None
 
     ##### Setup x0_model
+    print("Setting up model.")
     x0_model_class, nn_params = get_model_setup(cfg, tokenizer) 
     
     print(cfg)

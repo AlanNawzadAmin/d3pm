@@ -48,8 +48,8 @@ def newton_root_finder(func, x0, ts, min_x=torch.tensor(1e-7), max_iter=100, tol
     mask = torch.ones_like(ts).bool()
 
     for _ in range(max_iter):
-        x_masked = x[mask].detach().requires_grad_(True)
         with torch.enable_grad():
+            x_masked = x[mask].detach().requires_grad_(True)
             f_masked = func(x_masked, ts[mask])
             df_masked = torch.autograd.grad(f_masked.sum(), x_masked)[0]
             f[mask] = f_masked.detach()

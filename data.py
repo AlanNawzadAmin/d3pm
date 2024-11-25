@@ -751,6 +751,7 @@ def get_protein_dataloaders(cfg):
 
     max_len = 1024
     tokenizer = Tokenizer()
+    print("Getting Uniref.")
     train_dataset = UniRefDataset('/scratch/aa11803/d3pm/data/uniref_2020/uniref50/', 'train', structure=False, max_len=max_len)
     test_dataset = UniRefDataset('/scratch/aa11803/d3pm/data/uniref_2020/uniref50/', 'test', structure=False, max_len=max_len)
 
@@ -763,6 +764,7 @@ def get_protein_dataloaders(cfg):
         return mask_pad(tokenized)
 
     # multiprocessing.cpu_count()
+    print("Setting N workers.")
     num_workers = 16//torch.cuda.device_count()
     if hasattr(cfg.train, 'pack') and cfg.train.pack:
         block_size = 13
@@ -774,9 +776,11 @@ def get_protein_dataloaders(cfg):
             strings[0, 1:] = ''
             strings = [(''.join(strs)[:max_len],) for strs in strings]
             return collate_fn(strings)
+        print("Building dataloader.")
         train_dataloader = DataLoader(train_dataset, batch_size=batch_size* block_size, num_workers=num_workers, shuffle=True, collate_fn=collate_fn_pack)
     else:
         train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
+    print("Building test dataloader.")
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, collate_fn=collate_fn)
 
     return train_dataloader, test_dataloader

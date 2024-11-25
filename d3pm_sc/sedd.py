@@ -39,7 +39,7 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
 
     def pre_configure_model(self, dataloader):
         self.calc_p0(dataloader)
-        self.log_alpha, self.beta, *_ = self.get_beta_func(self.L, self.p0, 'SEDD')
+        self.log_alpha, self.beta, *_ = self.get_beta_func(self.L.cpu(), self.p0.cpu(), 'SEDD')
         
     def get_stationary(self):
         evals, evecs = torch.linalg.eig(self.L.T)
@@ -137,8 +137,9 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         # predict prev(x_t) or x_{t-1}
         predicted_x0_logits = self.model_predict(x, t, cond if cond is not None else attn_mask,None)
         bwd_inf_gen = self.r_posterior(predicted_x0_logits, x, t,None)
-        bwd_inf_gen.scatter_(-1, x.unsqueeze(-1),
-                             - F.relu(bwd_inf_gen).sum(-1).unsqueeze(-1))
+        bwd_inf_gen.scatter_(-1, x.unsqueeze(-1), 0)
+        bwd_inf_gen.scatter_(-1, x.unsqueeze(-1), - bwd_inf_gen.sum(-1).unsqueeze(-1))
+        # assert torch.allclose(bwd_inf_gen.sum(-1), 0)
         
         x_0_logits = convert_to_distribution(x, self.num_classes, self.eps)
         softmaxed = torch.softmax(x_0_logits, dim=-1)

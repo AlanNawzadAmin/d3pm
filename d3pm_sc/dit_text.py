@@ -166,7 +166,7 @@ class TimestepEmbedder(nn.Module):
     self.frequency_embedding_size = frequency_embedding_size
 
   @staticmethod
-  def timestep_embedding(t, dim, max_period=10000):
+  def timestep_embedding(t, dim, max_period=1000):
     """
     Create sinusoidal timestep embeddings.
     :param t: a 1-D Tensor of N indices, one per batch element.
@@ -177,9 +177,9 @@ class TimestepEmbedder(nn.Module):
     """
     # https://github.com/openai/glide-text2im/blob/main/glide_text2im/nn.py
     half = dim // 2
-    freqs = torch.exp(
+    freqs = 2 * 3.14159 * torch.exp(
       - math.log(max_period)
-      * torch.arange(start=0, end=half, dtype=torch.float32)
+      * (torch.arange(start=0, end=half, dtype=torch.float32) - half/3)
       / half).to(device=t.device)
     args = t[:, None].float() * freqs[None]
     embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)

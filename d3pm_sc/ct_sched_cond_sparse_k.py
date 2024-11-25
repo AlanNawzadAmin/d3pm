@@ -5,7 +5,7 @@ from torch.autograd import Function
 from tqdm import tqdm
 import time
 
-from .utils import kls, get_sort_S, get_counts_S_flat, sample_index_S
+from .utils import kls, get_sort_S, get_counts_S_flat, sample_index_S, sparse_zeros_like
 from .schedule_sample import sample_n_transitions_cont
 from .continuous_time_diffusion import ContinuousTimeDiffusion
 
@@ -119,6 +119,12 @@ class ScheduleConditionSparseK(ContinuousTimeDiffusion): #schedule conditioning 
         self.unif_rate = self.forward_kwargs['uniform_rate'] * (1 if self.freq_order else torch.tensor(1-self.stat).max())
         self.rate = self.rate + self.unif_rate
         self.up = self.unif_rate / self.rate
+        if self.up > 0.999:
+            self.up = 1
+            K = sparse_zeros_like(self.K)
+            K_coo = sparse_zeros_like(self.K_coo)
+            K_csc = sparse_zeros_like(self.K_csc)
+            K_T = sparse_zeros_like(self.K_T)
         print("Uniform rate is:", self.up)
         # @torch.jit.script
         def K_T_operator_first(K_T, x_0_probs, stat, eff_num_classes:int, up:float): # assumes x_0_probs are normalized

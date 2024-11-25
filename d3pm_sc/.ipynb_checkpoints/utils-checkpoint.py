@@ -184,3 +184,39 @@ def sample_index_S(S):
     
     return sampled_index
 
+def sparse_zeros_like(K):
+    """
+    Creates a sparse tensor of zeros with same size, dtype, and layout as input tensor K.
+    
+    Args:
+        K (torch.Tensor): Input sparse tensor of any dimension
+        
+    Returns:
+        torch.Tensor: Sparse tensor of zeros with same properties as K
+    """
+    if K.layout == torch.sparse_coo:
+        return torch.sparse_coo_tensor(
+            indices=torch.empty((K.dim(), 0), dtype=torch.long, device=K.device),
+            values=torch.empty(0, dtype=K.dtype, device=K.device),
+            size=K.size(),
+            device=K.device
+        )
+    elif K.layout == torch.sparse_csr:
+        return torch.sparse_csr_tensor(
+            crow_indices=torch.zeros(K.size(0) + 1, dtype=torch.long, device=K.device),
+            col_indices=torch.empty(0, dtype=torch.long, device=K.device),
+            values=torch.empty(0, dtype=K.dtype, device=K.device),
+            size=K.size(),
+            device=K.device
+        )
+    elif K.layout == torch.sparse_csc:
+        return torch.sparse_csc_tensor(
+            ccol_indices=torch.zeros(K.size(1) + 1, dtype=torch.long, device=K.device),
+            row_indices=torch.empty(0, dtype=torch.long, device=K.device),
+            values=torch.empty(0, dtype=K.dtype, device=K.device),
+            size=K.size(),
+            device=K.device
+        )
+    else:
+        raise ValueError(f"Unsupported sparse layout: {K.layout}")
+

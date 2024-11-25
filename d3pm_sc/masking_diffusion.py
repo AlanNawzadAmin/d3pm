@@ -87,7 +87,7 @@ class MaskingDiffusion(ScheduleCondition): #schedule conditioning is True!
         while S.sum() > 0:
             # predict what comes next
             x_next = self.p_sample(
-                x, t, cond, attn_mask, torch.rand((*x.shape, self.num_classes), device=x.device), S
+                x, t, cond, attn_mask, torch.rand((*x.shape, self.num_classes), device=x.device), S, temperature=1
             )
             for b in range(len(x)):
                 trans_indices = torch.argwhere(S[b] > 0)
