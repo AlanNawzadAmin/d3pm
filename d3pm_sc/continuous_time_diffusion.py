@@ -71,7 +71,7 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
                 inv_scale * (bin_centers - 0.5 * bin_width))
             log_cdf_max = torch.nn.LogSigmoid()(
                 inv_scale * (bin_centers + 0.5 * bin_width))
-            logits = log_cdf_max + torch.log1p(-torch.exp(log_cdf_min-log_cdf_max) + self.eps)
+            logits = log_cdf_max + torch.log1p(-torch.exp(log_cdf_min-log_cdf_max)+self.eps)
             return logits
 
     def q_posterior_logits(self, x_0, x_t, t, S=None):

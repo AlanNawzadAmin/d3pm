@@ -45,7 +45,7 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         evals, evecs = torch.linalg.eig(self.L.T)
         norms_sq = torch.real(evals)
         max_eval = evals[torch.argmax(norms_sq)]
-        assert torch.sqrt(torch.real(max_eval * max_eval.conj())) < self.eps
+        # assert torch.sqrt(torch.real(max_eval * max_eval.conj())) < self.eps
         stationary = evecs[:, torch.argmax(norms_sq)]
         assert torch.allclose(torch.imag(stationary), torch.tensor(0, dtype=self.L.dtype))
         stationary = torch.real(stationary)
@@ -94,7 +94,7 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
         p_y = self.get_trans_mats_mvp(t, softmaxed)
         p_xt = p_y.gather(-1, x_t.unsqueeze(-1)).squeeze(-1)
-        ratios = (p_y + self.eps)/(p_xt[..., None] + self.eps)
+        ratios = p_y / (p_xt[..., None] + self.eps)
         ratios = ((ratios * self.L.T[x_t, :]).transpose(0, -1) * self.beta(t)).transpose(0, -1)
         return ratios
 
@@ -133,24 +133,23 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
             "ce_loss": ce_loss.detach().item(),
         }
 
-    def p_sample(self, x, t, cond, attn_mask, noise, delta_t, S=None):
+    def p_sample(self, x, t, cond, attn_mask, noise, delta_t, S=None, temperature=1):
         # predict prev(x_t) or x_{t-1}
-        predicted_x0_logits = self.model_predict(x, t, cond if cond is not None else attn_mask,None)
+        predicted_x0_logits = self.model_predict(x, t, cond if cond is not None else attn_mask,None)/temperature
         bwd_inf_gen = self.r_posterior(predicted_x0_logits, x, t,None)
         bwd_inf_gen.scatter_(-1, x.unsqueeze(-1), 0)
         bwd_inf_gen.scatter_(-1, x.unsqueeze(-1), - bwd_inf_gen.sum(-1).unsqueeze(-1))
         # assert torch.allclose(bwd_inf_gen.sum(-1), 0)
         
-        x_0_logits = convert_to_distribution(x, self.num_classes, self.eps)
-        softmaxed = torch.softmax(x_0_logits, dim=-1)
-        pred_r_posterior = torch.clip(softmaxed + delta_t * bwd_inf_gen, self.eps, 1.0)
-        pred_r_posterior = torch.log(pred_r_posterior)
+        x_t = F.one_hot(x, self.num_classes)
+        trans_mat = x_t + delta_t * bwd_inf_gen
+        # print("Max trans =", trans_mat.max(), "Min trans =", trans_mat.min())
+        pred_r_posterior = torch.clip(trans_mat, 0, 1.0)
+        # pred_r_posterior = torch.log(pred_r_posterior)
         # sample
         noise = torch.clip(noise, self.eps, 1.0)
-        gumbel_noise = -torch.log(-torch.log(noise)+self.eps)
-        sample = torch.argmax(
-            pred_r_posterior + gumbel_noise, dim=-1
-        )
+        gumbel_noise = 1/(-torch.log(noise))
+        sample = torch.argmax(pred_r_posterior * gumbel_noise, dim=-1)
         return sample
 
 

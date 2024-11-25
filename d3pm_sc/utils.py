@@ -29,6 +29,16 @@ def convert_to_distribution(x_0, num_classes, eps):
         x_0_logits = x_0.clone()
     return x_0_logits
 
+def convert_to_distribution_probs(x_0, num_classes):
+    # returns log probs of x_0 as a distribution
+    if x_0.dtype == torch.int64 or x_0.dtype == torch.int32:
+        x_0_logits = torch.log(
+            torch.nn.functional.one_hot(x_0, num_classes) + eps
+        )
+    else:
+        x_0_logits = x_0.clone()
+    return x_0_logits
+
 def get_inf_gen(forward_kwargs, num_classes):
     if forward_kwargs['type'] == "uniform":
         L = torch.ones(num_classes, num_classes) / (num_classes-1)

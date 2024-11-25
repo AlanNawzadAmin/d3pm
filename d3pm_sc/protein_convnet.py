@@ -2,6 +2,8 @@ import numpy as np
 from sequence_models.layers import PositionFeedForward
 from sequence_models.convolutional import MaskedConv1d, ByteNetBlock
 from torch import nn
+import torch
+import math
 import torch.nn.functional as F
 from .dit_text import modulate_fused
 
