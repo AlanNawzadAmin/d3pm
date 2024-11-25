@@ -388,11 +388,11 @@ class DIT(nn.Module, huggingface_hub.PyTorchModelHubMixin):
 
     if S is not None:
       bs, seq_len = S.shape[0], S.shape[1]
-      S_out = F.silu(self.s_embed_input(S.reshape(-1))).reshape(bs, seq_len, -1)
+      S_out = F.silu(self.s_embed_input(S.reshape(-1)+1)).reshape(bs, seq_len, -1)
       x = x + S_out
       
       # WIP, this is approximately correct but not thoroughly tested
-      S_out = F.silu(self.s_embed_block(S.reshape(-1))).reshape(bs, seq_len, -1)
+      S_out = F.silu(self.s_embed_block(S.reshape(-1)+1)).reshape(bs, seq_len, -1)
       c = c[:, None, :] + S_out
     
     try:
