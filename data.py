@@ -736,7 +736,7 @@ def get_img_dataloaders(cfg):
     # train_dataset, test_dataset = random_split(full_dataset, [train_size, len(full_dataset) - train_size])
 
     # multiprocessing.cpu_count()
-    num_workers = 16//torch.cuda.device_count()
+    num_workers = 16//max([1, torch.cuda.device_count()])
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, collate_fn=collate_fn)
     test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, collate_fn=collate_fn)
 
