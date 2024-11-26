@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 import time
 
-from .utils import kls, convert_to_distribution, get_inf_gen
+from .utils import kls, convert_to_probs, get_inf_gen
 from .schedule_sample import sample_n_transitions_cont
 from .continuous_time_diffusion import ContinuousTimeDiffusion
 
@@ -45,7 +45,6 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         evals, evecs = torch.linalg.eig(self.L.T)
         norms_sq = torch.real(evals)
         max_eval = evals[torch.argmax(norms_sq)]
-        # assert torch.sqrt(torch.real(max_eval * max_eval.conj())) < self.eps
         stationary = evecs[:, torch.argmax(norms_sq)]
         assert torch.allclose(torch.imag(stationary), torch.tensor(0, dtype=self.L.dtype))
         stationary = torch.real(stationary)
@@ -79,19 +78,22 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         # sample S
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
         x_1 = torch.log(self.get_trans_mats_index(t, x)+self.eps)
-        kl = kls(x_1, torch.log(self.get_stationary() + self.eps), self.eps)
+        kl = kls(x_1, torch.log(self.get_stationary() + self.eps))
         return kl.mean()
 
     def x_t_sample(self, x_0, t, noise, S):
         # forward process, x_0 is the clean input.
-        logits = torch.log(self.get_trans_mats_index(t, x_0)+self.eps)
+        probs = self.get_trans_mats_index(t, x_0)
         noise = torch.clip(noise, self.eps, 1.0)
-        gumbel_noise = -torch.log(-torch.log(noise))
-        return torch.argmax(logits + gumbel_noise, dim=-1)
+        gumbel_noise = 1 / (-torch.log(noise))
+        x_t_sample = torch.argmax(probs * gumbel_noise, dim=-1)
+        if attn_mask is not None:
+            return torch.where(attn_mask==1, x_t_sample, x_0)
+        else:
+            return x_t_sample
 
     def r_posterior(self, x_0, x_t, t, S): # returns backward inf_gen
-        x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
-        softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
+        softmaxed = convert_to_probs(x_0, self.num_classes) # bs, ..., num_classes
         p_y = self.get_trans_mats_mvp(t, softmaxed)
         p_xt = p_y.gather(-1, x_t.unsqueeze(-1)).squeeze(-1)
         ratios = p_y / (p_xt[..., None] + self.eps)

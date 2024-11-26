@@ -6,7 +6,7 @@ from tqdm import tqdm
 import math
 import time
 
-from .utils import kls, convert_to_distribution, get_inf_gen, sample_index_S
+from .utils import kls, convert_to_probs, get_inf_gen, sample_index_S
 from .schedule_sample import sample_n_transitions_cont
 from .continuous_time_diffusion import ContinuousTimeDiffusion
 
@@ -67,20 +67,6 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         assert torch.all(stationary >= 0)
         return stationary / stationary.sum()
 
-    def base_predict(self, x_t, t, cond, S=None):
-        if not self.input_logits:
-            return self.x0_model(x_t, t, cond, S).float()
-        else:
-            x_0_logits = torch.log(self.K_powers[S, :, x_t] + self.eps)
-            return self.x0_model(x_0_logits, t, cond, S).float()
-            
-    # def get_trans_mats_mvp2(self, Smk, v):
-    #     # 
-    #     """ v is a ...c matrix where K is cd, and Smk is ... """
-    #     trans_mats = self.K_powers[Smk, :, :] # make sure we ignore S=0 later!
-    #     dv = torch.einsum("b...c,b...cd->b...d", v, trans_mats)
-    #     return dv
-
     def get_trans_mats_mvp(self, Smk, v):
         """ v is a ...c matrix where K is cd, and Smk is ... """
         dv = v.to(dtype=self.eigenvectors.dtype).reshape(-1, v.shape[-1])
@@ -94,27 +80,27 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
         S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
         S = S.swapaxes(0, 1).reshape(*x.shape).long()
-        x_0_logits = convert_to_distribution(x, self.num_classes, self.eps)
-        softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
+        softmaxed = convert_to_probs(x, self.num_classes)  # bs, ..., num_classes
         trans = self.get_trans_mats_mvp(S, softmaxed)
         x_1 = torch.log(trans+self.eps)
-        kl = kls(x_1, torch.log(self.get_stationary() + self.eps), self.eps)
+        kl = kls(x_1, torch.log(self.get_stationary() + self.eps))
         return kl.mean()
 
-    def x_t_sample(self, x_0, t, noise, S):
+    def x_t_sample(self, x_0, t, noise, S, attn_mask=None):
         # forward process, x_0 is the clean input.
-        logits = torch.log(self.K_powers[S, x_0, :] + self.eps)
+        probs = self.K_powers[S, x_0, :]
         noise = torch.clip(noise, self.eps, 1.0)
-        gumbel_noise = -torch.log(-torch.log(noise))
-        return torch.argmax(logits + gumbel_noise, dim=-1)
+        gumbel_noise = 1/(-torch.log(noise))
+        x_t_sample = torch.argmax(probs * gumbel_noise, dim=-1)
+        if attn_mask is not None:
+            return torch.where(attn_mask==1, x_t_sample, x_0)
+        else:
+            return x_t_sample
 
     def q_posterior_logits(self, x_0, x_t, t, S, k=1, log=True):
         """ probs for x_{t-k}|x_t, x_0 """
         fact1 = self.K_powers.swapaxes(1, 2)[k, x_t, :] # x_t | x_{t-1}
-        x_0_logits = convert_to_distribution(x_0, self.num_classes, self.eps)
-        if self.fix_x_t_bias:
-            x_0_logits -= torch.log(self.K_powers[S, :, x_t] + self.eps) # x_{t} | x_{0}
-        softmaxed = torch.softmax(x_0_logits, dim=-1)  # bs, ..., num_classes
+        softmaxed = convert_to_probs(x_0, self.num_classes) # bs, ..., num_classes
         fact2 = self.get_trans_mats_mvp(S - k, softmaxed) # x_{t-1} | x_{0}
         if log:
             return torch.log(fact1 + self.eps) + torch.log(fact2 + self.eps)
@@ -122,13 +108,13 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
             return fact1 * fact2
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask=None,) -> torch.Tensor:
-        t, S, x_t = self.sample_point(x)
+        t, S, x_t = self.sample_point(x, attn_mask)
         # predict x_0 and prev(x_t)
         predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, S).float()
         true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S)
         pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x_t, t, S)
         # get kls and loss
-        kl = kls(true_q_posterior_logits, pred_q_posterior_logits, self.eps) # shape x
+        kl = kls(true_q_posterior_logits, pred_q_posterior_logits) # shape x
         if attn_mask is not None:
             kl = kl * attn_mask
         weight = - self.beta(t) / self.log_alpha(t)

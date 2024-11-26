@@ -127,9 +127,9 @@ class ByteNetLMTime(nn.Module):
         self.schedule_conditioning = schedule_conditioning
         if not schedule_conditioning:
             self.time_encoding = TimestepEmbedder(d_embedding) # Timestep encoding
-            self.time_mod_layer = nn.Linear(d_embedding, d_model)
+            self.time_mod_layer = nn.Linear(d_embedding, 2 * d_model)
         if schedule_conditioning:
-            self.s_embed_input = TimestepEmbedder(d_model)
+            self.s_embed_input = TimestepEmbedder(2 * d_model)
             self.s_embed_block = TimestepEmbedder(d_embedding)
         if not simple_embed:
             self.embedder = nn.Embedding(n_tokens, d_aa_emb, padding_idx=padding_idx)
@@ -168,16 +168,16 @@ class ByteNetLMTime(nn.Module):
         if S is not None:
             bs, seq_len = S.shape[0], S.shape[1]
             S_out = F.silu(self.s_embed_input(S.reshape(-1)+1)).reshape(bs, seq_len, -1)
-            x = x + S_out
+            x = modulate_fused(x,*S_out.chunk(2, dim=-1))
             S_out = F.silu(self.s_embed_block(S.reshape(-1)+1)).reshape(bs, seq_len, -1)
             c = S_out
         else:
             c = F.silu(self.time_encoding(t))[:, None, :]
-            x = x + self.time_mod_layer(c)
+            x = modulate_fused(x,*self.time_mod_layer(c).chunk(2, dim=-1))
 
         for layer, c_layer in zip(self.layers, self.c_mod_layers):
             c_mod = c_layer(c)
-            x = layer(x, c_mod, input_mask=input_mask.unsqueeze(-1))
+            x = layer(x, c_mod, input_mask=None)#input_mask.unsqueeze(-1))
         return self.decoder(self.last_norm(x))
 
 

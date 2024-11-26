@@ -13,7 +13,7 @@ def _at(a, t, x):
     t = t.reshape((bs, *[1] * (x.dim() - 1)))
     return a[t, x, :]
 
-def kls(dist1, dist2, eps): # KL of dists on last dim
+def kls(dist1, dist2, eps=None): # KL of dists on last dim
     out = F.kl_div(torch.log_softmax(dist2, dim=-1),
                    torch.log_softmax(dist1, dim=-1),
                   log_target=True, reduction='none').sum(-1)
@@ -28,6 +28,14 @@ def convert_to_distribution(x_0, num_classes, eps):
     else:
         x_0_logits = x_0.clone()
     return x_0_logits
+
+def convert_to_probs(x_0, num_classes):
+    # returns probs of x_0 as a distribution. input is either indices or logits
+    if x_0.dtype == torch.int64 or x_0.dtype == torch.int32:
+        x_0_probs = torch.nn.functional.one_hot(x_0, num_classes)
+    else:
+        x_0_probs = torch.softmax(x_0.clone(), dim=-1)
+    return x_0_probs
 
 def get_inf_gen(forward_kwargs, num_classes):
     if forward_kwargs['type'] == "uniform":
@@ -219,4 +227,35 @@ def sparse_zeros_like(K):
         )
     else:
         raise ValueError(f"Unsupported sparse layout: {K.layout}")
+
+def log1p(x: torch.Tensor) -> torch.Tensor:
+    """
+    Compute log(1 + x) in a numerically stable way, especially for x near -1.
+    
+    For x near -1, we use the identity:
+    log(1 + x) = log((1 + x)/(-x)) + log(-x)
+                = log(1 + 1/(-x - 1)) + log(-x)
+    
+    This avoids catastrophic cancellation when x ≈ -1.
+    
+    Args:
+        x: Input tensor
+    Returns:
+        log(1 + x) computed in a numerically stable way
+    """
+    # Use built-in implementation for x >= -0.7 as it's stable in this range
+    result = torch.log1p(x)
+    
+    # For x < -0.7, use our special case handling
+    mask = x < -0.7
+    if mask.any():
+        # Only process elements where x < -0.7
+        x_neg = x[mask]
+        
+        # Compute log(1 + x) using the alternate form
+        neg_x = -x_neg
+        inv_xp1 = 1.0 / (neg_x - 1.0)
+        result[mask] = torch.log1p(inv_xp1) + torch.log(neg_x)
+    
+    return result
 
