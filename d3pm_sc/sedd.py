@@ -86,22 +86,19 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         probs = self.get_trans_mats_index(t, x_0)
         noise = torch.clip(noise, self.eps, 1.0)
         gumbel_noise = 1 / (-torch.log(noise))
-        x_t_sample = torch.argmax(probs * gumbel_noise, dim=-1)
-        if attn_mask is not None:
-            return torch.where(attn_mask==1, x_t_sample, x_0)
-        else:
-            return x_t_sample
+        x_t = torch.argmax(probs * gumbel_noise, dim=-1)
+        return x_t
 
     def r_posterior(self, x_0, x_t, t, S): # returns backward inf_gen
         softmaxed = convert_to_probs(x_0, self.num_classes) # bs, ..., num_classes
         p_y = self.get_trans_mats_mvp(t, softmaxed)
         p_xt = p_y.gather(-1, x_t.unsqueeze(-1)).squeeze(-1)
-        ratios = p_y / (p_xt[..., None] + self.eps)
+        ratios = p_y / (p_xt[..., None]+self.eps)
         ratios = ((ratios * self.L.T[x_t, :]).transpose(0, -1) * self.beta(t)).transpose(0, -1)
         return ratios
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask=None, *args) -> torch.Tensor:
-        t, S, x_t = self.sample_point(x)
+        t, S, x_t = self.sample_point(x, attn_mask)
         print(S.float().mean())
         # predict x_0 and prev(x_t)
         predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, None)

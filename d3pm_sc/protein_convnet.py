@@ -165,7 +165,7 @@ class ByteNetLMTime(nn.Module):
         if not self.simple_embed:
             x = self.up_embedder(x)
 
-        if S is not None:
+        if self.schedule_conditioning:
             bs, seq_len = S.shape[0], S.shape[1]
             S_out = F.silu(self.s_embed_input(S.reshape(-1)+1)).reshape(bs, seq_len, -1)
             x = modulate_fused(x,*S_out.chunk(2, dim=-1))

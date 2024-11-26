@@ -77,7 +77,7 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
     def q_posterior_logits(self, x_0, x_t, t, S=None):
         raise NotImplementedError
 
-    def x_t_sample(self, x_0, t, noise, S=None, attn_mask=None):
+    def x_t_sample(self, x_0, t, noise, S=None):
         raise NotImplementedError
 
     def sample_point(self, x, attn_mask=None, rand_shape=None):   
@@ -85,8 +85,11 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
         S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
         S = S.swapaxes(0, 1).reshape(*x.shape).long()
         x_t = self.x_t_sample(
-            x, t, torch.rand((*x.shape, rand_shape if rand_shape is not None else self.num_classes), device=x.device), S, attn_mask
+            x, t, torch.rand((*x.shape, rand_shape if rand_shape is not None else self.num_classes), device=x.device), S
         )
+        if attn_mask is not None:
+            x_t = torch.where(attn_mask==1, x_t, x)
+            S = torch.where(attn_mask==1, S, 0 * S)
         return t, S, x_t
 
     def load_state_dict(self, state_dict, strict=True):

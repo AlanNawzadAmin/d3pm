@@ -39,10 +39,13 @@ class MaskingDiffusion(ScheduleCondition): #schedule conditioning is True!
     def base_predict(self, x_t, t, cond, S):
         masked_pos = S > 0
         masked_x_t = torch.where(masked_pos, self.num_classes, x_t)
+        if cond.sum() > 0 and torch.all(cond <= 1):
+            attn_mask = cond # don't mask already masked pos
+            masked_x_t = torch.where(attn_mask==1, masked_x_t, x_t) 
         return self.x0_model(masked_x_t, t, cond, S=S)[..., :-1]
     
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask: torch.Tensor = None) -> torch.Tensor:
-        t, S, x_t = self.sample_point(x)
+        t, S, x_t = self.sample_point(x, attn_mask)
         S = (S>0).long()
         # predict x_0 and prev(x_t)
         predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, S).float()
@@ -50,7 +53,7 @@ class MaskingDiffusion(ScheduleCondition): #schedule conditioning is True!
         pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x_t, t, S)
 
         # get kls and loss
-        kl = kls(true_q_posterior_logits, pred_q_posterior_logits, self.eps) # shape x
+        kl = kls(true_q_posterior_logits, pred_q_posterior_logits) # shape x
         if attn_mask is not None:
             kl = kl * attn_mask
         alpha_t = torch.exp(self.log_alpha(t))

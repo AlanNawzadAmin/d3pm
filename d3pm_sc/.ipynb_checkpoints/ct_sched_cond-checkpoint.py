@@ -86,16 +86,13 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         kl = kls(x_1, torch.log(self.get_stationary() + self.eps))
         return kl.mean()
 
-    def x_t_sample(self, x_0, t, noise, S, attn_mask=None):
+    def x_t_sample(self, x_0, t, noise, S):
         # forward process, x_0 is the clean input.
         probs = self.K_powers[S, x_0, :]
         noise = torch.clip(noise, self.eps, 1.0)
         gumbel_noise = 1/(-torch.log(noise))
-        x_t_sample = torch.argmax(probs * gumbel_noise, dim=-1)
-        if attn_mask is not None:
-            return torch.where(attn_mask==1, x_t_sample, x_0)
-        else:
-            return x_t_sample
+        x_t = torch.argmax(probs * gumbel_noise, dim=-1)
+        return x_t
 
     def q_posterior_logits(self, x_0, x_t, t, S, k=1, log=True):
         """ probs for x_{t-k}|x_t, x_0 """
