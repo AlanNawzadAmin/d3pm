@@ -153,8 +153,32 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         }
 
     
+    def p_sample(self, x, t, cond, attn_mask, noise, S=None, k=1, temperature=1):
+        # predict prev(x_t) or x_{t-1}
+        predicted_x0_logits = self.model_predict(x, t, cond if cond is not None else attn_mask, S) / temperature
+        pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x, t, S, k=k, log=False)
+        # sample
+        noise = torch.clip(noise, self.eps, 1.0)
+        gumbel_noise = 1 / (-torch.log(noise))
+        sample = torch.argmax(
+            pred_q_posterior_logits * gumbel_noise, dim=-1
+        )
+        return sample
+
+    def corrector_sample(self, x, t, cond, attn_mask, noise, S=None, k=1, temperature=1):
+        # predict prev(x_t) or x_{t-1}
+        predicted_x0_logits = self.model_predict(x, t, cond if cond is not None else attn_mask, S) / temperature
+        pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x, t, S, k=k, log=False)
+        # K'_x,.K_.,. denoises and then renoises immediately
+        sample_logits = torch.einsum('...i,...ij->...j',pred_q_posterior_logits, self.K_powers[k])
+        # sample
+        noise = torch.clip(noise, self.eps, 1.0)
+        gumbel_noise = 1 / (-torch.log(noise))
+        sample = torch.argmax(sample_logits * gumbel_noise, dim=-1)
+        return sample
+    
     def sample_sequence(self, x, cond=None, attn_mask=None, n_T=200, stride=10,
-                       use_tau=False):
+                        n_corrector_steps=10, temperature=1, use_tau=False):
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
         S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
         t = t * 0
@@ -164,8 +188,10 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         n_steps = torch.tensor([S[b].sum() for b in range(len(S))]).max().item()
         pbar = tqdm(total=n_steps, unit="iteration",
                     position=0, leave=True)
-        trans_step = max([n_steps // n_T, 1])
+        trans_step = max([n_steps // n_T, 1]) * (n_corrector_steps + 1)
         total_steps = math.ceil(n_steps/trans_step)
+        trans_corrector_k = max([trans_step // np.prod(x[0].shape), 1])
+        print("Corrector_k:", trans_corrector_k)
         # get order of denoising
         ks = torch.zeros([len(x), total_steps, len(S[0].flatten())], device=S.device, dtype=torch.long)
         for b in range(len(x)):
@@ -205,10 +231,15 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
             x = self.p_sample(
                 x, t, cond, attn_mask,
                 torch.rand((*x.shape, self.num_classes), device=x.device),
-                S, k=k,
+                S, k=k, temperature=temperature,
             )
             assert torch.all(S_temp <= S)
             S = S_temp
+            for l in range(n_corrector_steps):
+                x = self.corrector_sample(x, t, cond, attn_mask,
+                    torch.rand((*x.shape, self.num_classes), device=x.device),
+                    S, k=torch.minimum(S, torch.tensor(trans_corrector_k)), temperature=temperature,
+                )
             pbar.update(trans_step)
             steps += 1
             if steps % stride == 0:

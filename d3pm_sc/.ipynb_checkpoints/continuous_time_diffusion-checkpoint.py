@@ -89,18 +89,6 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
         )
         return t, S, x_t
 
-    def p_sample(self, x, t, cond, attn_mask, noise, S=None, k=1, temperature=1):
-        # predict prev(x_t) or x_{t-1}
-        predicted_x0_logits = self.model_predict(x, t, cond if cond is not None else attn_mask, S) / temperature
-        pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x, t, S, k=k, log=False)
-        # sample
-        noise = torch.clip(noise, self.eps, 1.0)
-        gumbel_noise = 1 / (-torch.log(noise))
-        sample = torch.argmax(
-            pred_q_posterior_logits * gumbel_noise, dim=-1
-        )
-        return sample
-
     def load_state_dict(self, state_dict, strict=True):
         # Call the parent class's load_state_dict method
         missing_keys, unexpected_keys = super().load_state_dict(state_dict, strict=False)
