@@ -88,11 +88,19 @@ def train(cfg: DictConfig) -> None:
         sample_x, attn_mask = batch['input_ids'].cuda(), batch['attention_mask'].cuda()
     cond = batch['cond'].cuda() if 'cond' in batch else None
 
+    ##### load old samples
+    if cfg.sample.restart:
+        all_images = []
+    else:
+        try:
+            all_images = np.load(cfg.sample.save_path)
+        except FileNotFoundError:
+            all_images = []
+    
     ##### Sample
     torch.set_float32_matmul_precision('high')
     batch_size = cfg.sample.batch_size
     n_steps = int(np.ceil(cfg.sample.n_samples / batch_size))
-    all_images = []
     with torch.no_grad():
         for k in range(n_steps):
             p = model.get_stationary()

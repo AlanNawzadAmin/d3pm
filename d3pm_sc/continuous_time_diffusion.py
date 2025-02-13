@@ -42,7 +42,7 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
         self.hparams.update(x0_model_class=x0_model_class.__name__)
         self.x0_model = x0_model_class(**nn_params)
         self.hybrid_loss_coeff = hybrid_loss_coeff
-        self.eps = 1e-6
+        self.eps = 1e-9
         self.num_classes = num_classes
         self.t_max = t_max
         self.logistic_pars = logistic_pars
@@ -54,7 +54,7 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
         raise NotImplementedError
 
     def base_predict(self, x_t, t, cond, S=None):
-        return self.x0_model(x_t, t, cond, S).float()
+        return self.x0_model(x_t, t, cond, S).to(torch.float32)
 
     def model_predict(self, x_t, t, cond, S=None):
         pred = self.base_predict(x_t, t, cond, S)
@@ -87,12 +87,12 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
         x_t = self.x_t_sample(
             x, t, torch.rand((*x.shape, rand_shape if rand_shape is not None else self.num_classes), device=x.device), S
         )
-        if attn_mask is not None:
-            x_t = torch.where(attn_mask==1, x_t, x)
-            S = torch.where(attn_mask==1, S, 0 * S)
+        # if attn_mask is not None:
+        #     x_t = torch.where(attn_mask==1, x_t, x)
+        #     S = torch.where(attn_mask==1, S, 0 * S)
         return t, S, x_t
 
-    def load_state_dict(self, state_dict, strict=True):
+    def load_state_dict(self, state_dict, strict=False):
         # Call the parent class's load_state_dict method
         missing_keys, unexpected_keys = super().load_state_dict(state_dict, strict=False)
 
@@ -117,7 +117,6 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
                                     self.__class__.__name__, "\n\t".join(error_msgs)))
 
         return missing_keys, unexpected_keys
-
 
     @classmethod
     def load_from_checkpoint(cls, checkpoint_path, map_location=None, **kwargs):

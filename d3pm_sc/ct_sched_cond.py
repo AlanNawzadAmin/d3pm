@@ -73,7 +73,8 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         diag = self.eigenvalues ** F.relu(Smk.flatten()[..., None])
         dv = dv @ self.eigenvectors
         dv = dv * diag
-        return (dv @ self.eigenvectors_inv).float().reshape(v.shape)
+        dv = dv @ self.eigenvectors_inv
+        return F.relu(dv.double()).to(torch.float32).reshape(v.shape)
     
     def get_kl_t1(self, x):
         # sample S
@@ -99,6 +100,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         fact1 = self.K_powers.swapaxes(1, 2)[k, x_t, :] # x_t | x_{t-1}
         softmaxed = convert_to_probs(x_0, self.num_classes) # bs, ..., num_classes
         fact2 = self.get_trans_mats_mvp(S - k, softmaxed) # x_{t-1} | x_{0}
+        assert torch.all(fact1 >=0) and torch.all(fact2 >=0)
         if log:
             return torch.log(fact1 + self.eps) + torch.log(fact2 + self.eps)
         else:
@@ -107,7 +109,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask=None,) -> torch.Tensor:
         t, S, x_t = self.sample_point(x, attn_mask)
         # predict x_0 and prev(x_t)
-        predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, S).float()
+        predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, S).to(torch.float32)
         true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S)
         pred_q_posterior_logits = self.q_posterior_logits(predicted_x0_logits, x_t, t, S)
         # get kls and loss
@@ -129,7 +131,6 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         else:
             ce_loss = ce_loss.mean()
 
-        # print(S.float().mean())
         return self.hybrid_loss_coeff * ce_loss + vb_loss, {
             "vb_loss": vb_loss.detach().item(),
             "ce_loss": ce_loss.detach().item(),
@@ -180,7 +181,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         for b in range(len(x)):
             # count how many in each bin
             if use_tau:
-                ts = torch.linspace(0, self.t_max, total_steps+1, device=S.device).float()
+                ts = torch.linspace(0, self.t_max, total_steps+1, device=S.device).to(torch.float32)
                 weights = - self.log_alpha(ts)
                 diffs = weights[1:] - weights[:-1]
                 n_steps = torch.bincount(torch.multinomial(diffs, num_samples=S[b].sum(), replacement=True),
@@ -189,7 +190,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
                 n_steps = torch.cat([torch.zeros_like(n_steps[[0]]), n_steps], axis=-1).long()
                 assert n_steps[-1] == S[b].sum()
             else:
-                n_steps = trans_step * torch.ones(total_steps, device=S.device).float()
+                n_steps = trans_step * torch.ones(total_steps, device=S.device).to(torch.float32)
                 n_steps = torch.cumsum(n_steps, -1)
                 n_steps = torch.cat([torch.zeros_like(n_steps[[0]]), n_steps], axis=-1).long()
                 assert n_steps[-1] >= S[b].sum()

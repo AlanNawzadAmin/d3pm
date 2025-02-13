@@ -1,6 +1,6 @@
 import torch
 
-def root_finder(func, x0, x1, ts, max_iter=100, tol=1e-6):
+def root_finder(func, x0, x1, ts, max_iter=100, tol=1e-12):
     """ Variation on Brentq """
     def secant_step(x0, x1, f0, f1):
         return x1 - f1 * (x1 - x0) / (f1 - f0 + 1e-15)  # Add small epsilon to avoid division by zero
@@ -39,9 +39,9 @@ def root_finder(func, x0, x1, ts, max_iter=100, tol=1e-6):
     
     return torch.where(torch.abs(f2) < tol, x2, torch.full_like(x2, float('nan')))
 
-def newton_root_finder(func, x0, ts, min_x=torch.tensor(1e-7), max_iter=100, tol=1e-6, print_=False):
+def newton_root_finder(func, x0, ts, min_x=torch.tensor(1e-8), max_iter=1000, tol=1e-12, print_=False):
     ts = ts.detach()
-    x = x0 * torch.ones_like(ts)
+    x = x0 * torch.ones_like(ts).double()
     x = torch.maximum(x, min_x)
     f = torch.ones_like(ts)
     df = torch.ones_like(ts)

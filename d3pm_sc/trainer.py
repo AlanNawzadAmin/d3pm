@@ -97,6 +97,7 @@ class DiffusionTrainer(pl.LightningModule):
         self.n_gen_images = n_gen_images
         self.n_stat_samples = n_stat_samples
         self.tokenizer = tokenizer
+        # self.to(torch.float32)
 
     def forward(self, x):
         return NotImplementedError
@@ -118,7 +119,7 @@ class DiffusionTrainer(pl.LightningModule):
                 x, _ = batch
             elif isinstance(batch, dict): #text datasets
                 x = batch['input_ids']
-            new =  F.one_hot(x.long(), num_classes=self.num_classes).float().view((-1, self.num_classes)).sum(0)
+            new =  F.one_hot(x.long(), num_classes=self.num_classes).to(torch.float32).view((-1, self.num_classes)).sum(0)
             p0 = p0 + new
             pbar.update(new.sum().item())
         pbar.close()

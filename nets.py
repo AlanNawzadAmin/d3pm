@@ -4,7 +4,7 @@ from omegaconf import OmegaConf
 from d3pm_sc.unet import UNet, KingmaUNet, SimpleUNet, GigaUNet
 from d3pm_sc.dit_vision import DiT_Llama
 from d3pm_sc.dit_text import DIT
-from d3pm_sc.protein_convnet import ByteNetLMTime
+from d3pm_sc.protein_convnet import ByteNetLMTime, ByteNetLMTimeNew
 
 image_nn_name_dict = {
     "SimpleUNet":SimpleUNet,
@@ -19,7 +19,8 @@ text_nn_name_dict = {
 }
 
 protein_nn_name_dict = {
-    "Conv": ByteNetLMTime
+    "Conv": ByteNetLMTime,
+    "ConvNew": ByteNetLMTimeNew
 }
 
 def get_model_setup(cfg, tokenizer=None):

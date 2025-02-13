@@ -57,22 +57,22 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
     #     return torch.einsum("b...c,bcd->b...d", v, mat)
 
     def get_trans_mats_mvp(self, t, v):
-        # 
-        """ v is a b...c matrix where L is cd, and t is b """
+        """ v is a b...c POSITIVE(!) matrix where L is cd, and t is b """
         dv = v.to(dtype=self.eigenvectors.dtype).reshape(v.shape[0], -1, v.shape[-1])
         diag = torch.exp(-self.log_alpha(t)[..., None] * self.eigenvalues)
         dv = dv @ self.eigenvectors
         dv = dv * diag.unsqueeze(-2)
-        return (dv @ self.eigenvectors_inv).float().reshape(v.shape)
+        dv = dv @ self.eigenvectors_inv
+        return F.relu(dv.double()).to(t.dtype).reshape(v.shape) # negative values are errors
 
     def get_trans_mats_index(self, t, ind):
-        # 
         """ ind is a b... matrix of indices up to c where L is cd, and t is b """
         dind = ind.reshape(ind.shape[0], -1)
         diag = torch.exp(-self.log_alpha(t)[..., None] * self.eigenvalues)
         dv = self.eigenvectors[dind, :]
         dv = dv * diag.unsqueeze(-2)
-        return (dv @ self.eigenvectors_inv).float().reshape(ind.shape+(self.num_classes,))
+        dv = dv @ self.eigenvectors_inv
+        return F.relu(dv.double()).to(t.dtype).reshape(ind.shape+(self.num_classes,))
 
     def get_kl_t1(self, x):
         # sample S
@@ -93,36 +93,38 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         softmaxed = convert_to_probs(x_0, self.num_classes) # bs, ..., num_classes
         p_y = self.get_trans_mats_mvp(t, softmaxed)
         p_xt = p_y.gather(-1, x_t.unsqueeze(-1)).squeeze(-1)
-        ratios = p_y / (p_xt[..., None]+self.eps)
-        ratios = ((ratios * self.L.T[x_t, :]).transpose(0, -1) * self.beta(t)).transpose(0, -1)
-        return ratios
+        if not torch.all(p_xt>1000*self.eps):
+            err = torch.any(p_xt<=self.eps, dim=-1)
+            print("Warning! small p_xt:", t[err], p_xt[err], x_0[err])
+        ratios = p_y / (p_xt[..., None] + self.eps)
+        bwd_inf_gen = ((ratios * self.L.T[x_t, :]).transpose(0, -1) * self.beta(t)).transpose(0, -1)
+        bwd_inf_gen.scatter_(-1, x_t.unsqueeze(-1), 0) # set diag to 0
+        return bwd_inf_gen
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask=None, *args) -> torch.Tensor:
         t, S, x_t = self.sample_point(x, attn_mask)
-        print(S.float().mean())
+        # print("av S:", S.float().mean())
         # predict x_0 and prev(x_t)
         predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, None)
         true_r_posterior = self.r_posterior(x, x_t, t, None)
         pred_r_posterior = self.r_posterior(predicted_x0_logits, x_t, t, None)
 
         # get kls and loss
-        kl = (- (true_r_posterior * torch.log(F.relu(pred_r_posterior)+self.eps)
-                 - pred_r_posterior)
-              + (true_r_posterior * torch.log(F.relu(true_r_posterior)+self.eps)
-                 - true_r_posterior))
-        kl = (kl * (true_r_posterior>=0)).sum(-1)
+        kl = (- (torch.xlogy(true_r_posterior, pred_r_posterior+self.eps) - pred_r_posterior)
+              + (torch.xlogy(true_r_posterior, true_r_posterior) - true_r_posterior))
+        kl = kl.sum(-1)
         if attn_mask is not None:
             kl = kl * attn_mask
         vb_loss = kl.mean() * self.t_max
         if attn_mask is not None:
             vb_loss = vb_loss / attn_mask.mean()
-        print(vb_loss)
+        print("vb loss:", vb_loss)
 
         # Also calculate cross entropy loss
         predicted_x0_logits = predicted_x0_logits.flatten(start_dim=0, end_dim=-2)
         x = x.flatten(start_dim=0, end_dim=-1)
         ce_loss = torch.nn.CrossEntropyLoss(reduction='none')(predicted_x0_logits, x)
-        print(ce_loss.mean())
+        print("ce loss:", ce_loss.mean())
         if attn_mask is not None:
             ce_loss = (ce_loss * attn_mask.flatten()).sum() / attn_mask.sum()
         else:
@@ -132,10 +134,11 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
             "ce_loss": ce_loss.detach().item(),
         }
 
+    
     def p_sample(self, x, t, cond, attn_mask, noise, delta_t, S=None, temperature=1):
         # predict prev(x_t) or x_{t-1}
         predicted_x0_logits = self.model_predict(x, t, cond if cond is not None else attn_mask,None)/temperature
-        bwd_inf_gen = self.r_posterior(predicted_x0_logits, x, t,None)
+        bwd_inf_gen = self.r_posterior(predicted_x0_logits, x, t, None)
         bwd_inf_gen.scatter_(-1, x.unsqueeze(-1), 0)
         bwd_inf_gen.scatter_(-1, x.unsqueeze(-1), - bwd_inf_gen.sum(-1).unsqueeze(-1))
         # assert torch.allclose(bwd_inf_gen.sum(-1), 0)
@@ -143,17 +146,16 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         x_t = F.one_hot(x, self.num_classes)
         trans_mat = x_t + delta_t * bwd_inf_gen
         # print("Max trans =", trans_mat.max(), "Min trans =", trans_mat.min())
-        pred_r_posterior = torch.clip(trans_mat, 0, 1.0)
-        # pred_r_posterior = torch.log(pred_r_posterior)
         # sample
         noise = torch.clip(noise, self.eps, 1.0)
         gumbel_noise = 1/(-torch.log(noise))
-        sample = torch.argmax(pred_r_posterior * gumbel_noise, dim=-1)
+        sample = torch.argmax(trans_mat * gumbel_noise, dim=-1)
         return sample
 
 
     def sample_sequence(self, x, cond=None, attn_mask=None, n_T=200, stride=10):
-        steps = 0
+        n_T = 1
+        steps = 0 ## TODO fix sampling when there are masks
         images = []
         pbar = tqdm(torch.flip(torch.linspace(0, self.t_max, n_T, dtype=torch.float32), (0,)), position=0, leave=True)
         for t in pbar:
@@ -166,9 +168,6 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
             steps += 1
             if steps % stride == 0:
                 images.append(x)
-
-        # if last step is not divisible by stride, we add the last image.
         if steps % stride != 0:
             images.append(x)
-
         return images
