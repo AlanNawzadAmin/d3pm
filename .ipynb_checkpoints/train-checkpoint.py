@@ -105,7 +105,7 @@ def train(cfg: DictConfig) -> None:
     update_wandb_config()
 
     if cfg.data.data == 'uniref50':
-        val_check_interval = 5 * (210000//cfg.train.batch_size)
+        val_check_interval = 2 * (210000//cfg.train.batch_size)
     else:
         val_check_interval = 1.0
     print("broadcast buffer:", not using_lang)

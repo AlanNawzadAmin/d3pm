@@ -75,7 +75,6 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         return F.relu(dv.double()).to(t.dtype).reshape(ind.shape+(self.num_classes,))
 
     def get_kl_t1(self, x):
-        # sample S
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
         x_1 = torch.log(self.get_trans_mats_index(t, x)+self.eps)
         kl = kls(x_1, torch.log(self.get_stationary() + self.eps))
@@ -102,10 +101,10 @@ class SEDD(ContinuousTimeDiffusion): #schedule conditioning is True!
         return bwd_inf_gen
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask=None, *args) -> torch.Tensor:
-        t, S, x_t = self.sample_point(x, attn_mask)
+        t, _, x_t = self.sample_point(x, attn_mask)
         # print("av S:", S.float().mean())
         # predict x_0 and prev(x_t)
-        predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, None)
+        predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, None).to(torch.float32)
         true_r_posterior = self.r_posterior(x, x_t, t, None)
         pred_r_posterior = self.r_posterior(predicted_x0_logits, x_t, t, None)
 
