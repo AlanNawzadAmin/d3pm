@@ -35,11 +35,16 @@ def sample_full_transitions(beta_t, batch_size):
     transitions = torch.bernoulli(beta_t)
     return transitions.bool()
 
-def sample_n_transitions_cont(log_alpha, batch_size, times):
+def sample_n_transitions_cont(log_alpha, batch_size, times, no_zero=False):
     """ Continuous version of above. alpha is a function that takes t.
     """
     t_shape = times.shape
     times = times.reshape(-1)
     log_alpha_t = log_alpha(times).reshape(1, -1).repeat(batch_size, 1)
     transitions = torch.poisson(-log_alpha_t)
+    if no_zero:
+        all_zeros = transitions.sum(0) == 0
+        while torch.any(all_zeros):
+            transitions[:, all_zeros] = torch.poisson(-log_alpha_t[:, all_zeros])
+            all_zeros = transitions.sum(0) == 0
     return transitions

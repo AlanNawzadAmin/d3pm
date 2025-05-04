@@ -80,9 +80,9 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
     def x_t_sample(self, x_0, t, noise, S=None):
         raise NotImplementedError
 
-    def sample_point(self, x, attn_mask=None, rand_shape=None):   
+    def sample_point(self, x, attn_mask=None, rand_shape=None, no_zero=False):   
         t = torch.rand(x.shape[0], device=x.device) * self.t_max
-        S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
+        S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t, no_zero=no_zero)
         S = S.swapaxes(0, 1).reshape(*x.shape).long()
         x_t = self.x_t_sample(
             x, t, torch.rand((*x.shape, rand_shape if rand_shape is not None else self.num_classes), device=x.device), S

@@ -30,6 +30,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         self.save_hyperparameters(ignore=['x0_model_class'])
         self.fix_x_t_bias = fix_x_t_bias
         self.input_logits = input_logits
+        self.rao_blackwell = True
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
         # Precalculate Ls
@@ -107,7 +108,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
             return fact1 * fact2
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask=None,) -> torch.Tensor:
-        t, S, x_t = self.sample_point(x, attn_mask)
+        t, S, x_t = self.sample_point(x, attn_mask, self.rao_blackwell)
         # predict x_0 and prev(x_t)
         predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, S).to(torch.float32)
         true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S)
@@ -117,6 +118,8 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         if attn_mask is not None:
             kl = kl * attn_mask
         weight = - self.beta(t) / self.log_alpha(t)
+        if self.rao_blackwell:
+            weight = weight * (- torch.expm1(self.log_alpha(t) * attn_mask.reshape(len(t), -1).sum(-1)))
         weight = (S.swapaxes(0, -1) * weight).swapaxes(0, -1)
         vb_loss = (kl * weight).mean() * self.t_max
         if attn_mask is not None:
@@ -162,7 +165,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         return sample
     
     def sample_sequence(self, x, cond=None, attn_mask=None, n_T=200, stride=10,
-                        n_corrector_steps=10, temperature=1, use_tau=False):
+                        n_corrector_steps=10, temperature=1, use_tau=True):
         t = self.t_max * torch.ones(x.shape[0], device=x.device)
         S = sample_n_transitions_cont(self.log_alpha, x[0].flatten().shape[0], t)
         t = t * 0
