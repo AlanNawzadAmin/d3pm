@@ -30,7 +30,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         self.save_hyperparameters(ignore=['x0_model_class'])
         self.fix_x_t_bias = fix_x_t_bias
         self.input_logits = input_logits
-        self.rao_blackwell = True
+        self.rao_blackwell = False
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
         # Precalculate Ls
@@ -92,6 +92,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         # forward process, x_0 is the clean input.
         probs = self.K_powers[S, x_0, :]
         noise = torch.clip(noise, self.eps, 1.0)
+        print(probs.shape, S.shape, x_0.shape, noise.shape)
         gumbel_noise = 1/(-torch.log(noise))
         x_t = torch.argmax(probs * gumbel_noise, dim=-1)
         return x_t
@@ -108,7 +109,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
             return fact1 * fact2
 
     def forward(self, x: torch.Tensor, cond: torch.Tensor = None, attn_mask=None,) -> torch.Tensor:
-        t, S, x_t = self.sample_point(x, attn_mask, self.rao_blackwell)
+        t, S, x_t = self.sample_point(x, attn_mask, no_zero=self.rao_blackwell)
         # predict x_0 and prev(x_t)
         predicted_x0_logits = self.model_predict(x_t, t, cond if cond is not None else attn_mask, S).to(torch.float32)
         true_q_posterior_logits = self.q_posterior_logits(x, x_t, t, S)
@@ -119,11 +120,15 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
             kl = kl * attn_mask
         weight = - self.beta(t) / self.log_alpha(t)
         if self.rao_blackwell:
+            print("num 0", (attn_mask==0).sum())
+            print(attn_mask.reshape(len(t), -1).sum(-1))
+            print((- torch.expm1(self.log_alpha(t) * attn_mask.reshape(len(t), -1).sum(-1))))
             weight = weight * (- torch.expm1(self.log_alpha(t) * attn_mask.reshape(len(t), -1).sum(-1)))
         weight = (S.swapaxes(0, -1) * weight).swapaxes(0, -1)
         vb_loss = (kl * weight).mean() * self.t_max
         if attn_mask is not None:
             vb_loss = vb_loss / attn_mask.mean()
+        print(vb_loss)
 
         # Also calculate cross entropy loss
         predicted_x0_logits = predicted_x0_logits.flatten(start_dim=0, end_dim=-2)
@@ -225,7 +230,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
             for l in range(n_corrector_steps):
                 x = self.corrector_sample(x, t, cond, attn_mask,
                     torch.rand((*x.shape, self.num_classes), device=x.device),
-                    S, k=torch.minimum(S, torch.tensor(trans_corrector_k)), temperature=temperature,
+                    S, k=torch.minimum(S, k), temperature=temperature,
                 )
             pbar.update(trans_step)
             steps += 1
