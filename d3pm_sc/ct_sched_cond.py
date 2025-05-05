@@ -30,7 +30,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
         self.save_hyperparameters(ignore=['x0_model_class'])
         self.fix_x_t_bias = fix_x_t_bias
         self.input_logits = input_logits
-        self.rao_blackwell = False
+        self.rao_blackwell = True
         assert gamma >= 0 and gamma < 1 # full schedule and classical resp.
 
         # Precalculate Ls
@@ -187,8 +187,7 @@ class ScheduleCondition(ContinuousTimeDiffusion): #schedule conditioning is True
                 ts = torch.linspace(0, self.t_max, total_steps+1, device=S.device).to(torch.float32)
                 weights = - self.log_alpha(ts)
                 diffs = weights[1:] - weights[:-1]
-                n_steps = torch.bincount(torch.multinomial(diffs, num_samples=S[b].sum(), replacement=True),
-                                         None, n_T)
+                n_steps = torch.bincount(torch.multinomial(diffs, num_samples=S[b].sum(), replacement=True), minlength=total_steps)
                 n_steps = torch.cumsum(n_steps, -1)
                 n_steps = torch.cat([torch.zeros_like(n_steps[[0]]), n_steps], axis=-1).long()
                 assert n_steps[-1] == S[b].sum()

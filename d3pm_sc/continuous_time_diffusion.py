@@ -87,9 +87,9 @@ class ContinuousTimeDiffusion(DiffusionTrainer): #schedule conditioning is True!
         x_t = self.x_t_sample(
             x, t, torch.rand((*x.shape, rand_shape if rand_shape is not None else self.num_classes), device=x.device), S
         )
-        # if attn_mask is not None:
-        #     x_t = torch.where(attn_mask==1, x_t, x)
-        #     S = torch.where(attn_mask==1, S, 0 * S)
+        if attn_mask is not None:
+            x_t = torch.where(attn_mask==1, x_t, x)
+            S = torch.where(attn_mask==1, S, 0 * S)
         return t, S, x_t
 
     def load_state_dict(self, state_dict, strict=False):
